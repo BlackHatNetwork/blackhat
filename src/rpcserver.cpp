@@ -1,6 +1,5 @@
 // Copyright (c) 2010 Satoshi Nakamoto
-// Copyright (c) 2009-2014 The Bitcoin developers
-// Copyright (c) 2014-2015 The Dash developers
+// Copyright (c) 2009-2012 The Bitcoin developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -8,23 +7,27 @@
 
 #include "base58.h"
 #include "init.h"
-#include "main.h"
-#include "ui_interface.h"
 #include "util.h"
+#include "sync.h"
+#include "base58.h"
+#include "db.h"
+#include "ui_interface.h"
 #ifdef ENABLE_WALLET
 #include "wallet.h"
 #endif
 
 #include <boost/algorithm/string.hpp>
 #include <boost/asio.hpp>
+#include <boost/asio/ip/v6_only.hpp>
 #include <boost/asio/ssl.hpp>
 #include <boost/bind.hpp>
 #include <boost/filesystem.hpp>
+#include <boost/filesystem/fstream.hpp>
 #include <boost/foreach.hpp>
 #include <boost/iostreams/concepts.hpp>
 #include <boost/iostreams/stream.hpp>
 #include <boost/shared_ptr.hpp>
-#include "json/json_spirit_writer_template.h"
+#include <list>
 
 using namespace std;
 using namespace boost;
@@ -38,8 +41,6 @@ static asio::io_service* rpc_io_service = NULL;
 static map<string, boost::shared_ptr<deadline_timer> > deadlineTimers;
 static ssl::context* rpc_ssl_context = NULL;
 static boost::thread_group* rpc_worker_group = NULL;
-static boost::asio::io_service::work *rpc_dummy_work = NULL;
-static std::vector< boost::shared_ptr<ip::tcp::acceptor> > rpc_acceptors;
 
 void RPCTypeCheck(const Array& params,
                   const list<Value_type>& typesExpected,
@@ -84,7 +85,7 @@ void RPCTypeCheck(const Object& o,
 int64_t AmountFromValue(const Value& value)
 {
     double dAmount = value.get_real();
-    if (dAmount <= 0.0 || dAmount > 21000000.0)
+    if (dAmount <= 0.0 || dAmount > MAX_MONEY)
         throw JSONRPCError(RPC_TYPE_ERROR, "Invalid amount");
     int64_t nAmount = roundint64(dAmount * COIN);
     if (!MoneyRange(nAmount))
@@ -97,16 +98,11 @@ Value ValueFromAmount(int64_t amount)
     return (double)amount / (double)COIN;
 }
 
-std::string HexBits(unsigned int nBits)
-{
-    union {
-        int32_t nBits;
-        char cBits[4];
-    } uBits;
-    uBits.nBits = htonl((int32_t)nBits);
-    return HexStr(BEGIN(uBits.cBits), END(uBits.cBits));
-}
 
+//
+// Utilities: convert hex-encoded Values
+// (throws error if not hex).
+//
 uint256 ParseHashV(const Value& v, string strName)
 {
     string strHex;
@@ -118,10 +114,12 @@ uint256 ParseHashV(const Value& v, string strName)
     result.SetHex(strHex);
     return result;
 }
+
 uint256 ParseHashO(const Object& o, string strKey)
 {
     return ParseHashV(find_value(o, strKey), strKey);
 }
+
 vector<unsigned char> ParseHexV(const Value& v, string strName)
 {
     string strHex;
@@ -131,6 +129,7 @@ vector<unsigned char> ParseHexV(const Value& v, string strName)
         throw JSONRPCError(RPC_INVALID_PARAMETER, strName+" must be hexadecimal string (not '"+strHex+"')");
     return ParseHex(strHex);
 }
+
 vector<unsigned char> ParseHexO(const Object& o, string strKey)
 {
     return ParseHexV(find_value(o, strKey), strKey);
@@ -186,13 +185,8 @@ Value help(const Array& params, bool fHelp)
 {
     if (fHelp || params.size() > 1)
         throw runtime_error(
-            "help ( \"command\" )\n"
-            "\nList all commands, or get help for a specified command.\n"
-            "\nArguments:\n"
-            "1. \"command\"     (string, optional) The command to get help on\n"
-            "\nResult:\n"
-            "\"text\"     (string) The help text\n"
-        );
+            "help [command]\n"
+            "List commands, or get help for a command.");
 
     string strCommand;
     if (params.size() > 0)
@@ -208,10 +202,10 @@ Value stop(const Array& params, bool fHelp)
     if (fHelp || params.size() > 1)
         throw runtime_error(
             "stop\n"
-            "\nStop Dash server.");
+            "Stop BlackHat server.");
     // Shutdown will take long enough that the response should get back
     StartShutdown();
-    return "Dash server stopping";
+    return "BlackHat server stopping";
 }
 
 
@@ -224,107 +218,96 @@ Value stop(const Array& params, bool fHelp)
 static const CRPCCommand vRPCCommands[] =
 { //  name                      actor (function)         okSafeMode threadSafe reqWallet
   //  ------------------------  -----------------------  ---------- ---------- ---------
-    /* Overall control/query calls */
-    { "getinfo",                &getinfo,                true,      false,      false }, /* uses wallet if enabled */
-    { "help",                   &help,                   true,      true,       false },
-    { "stop",                   &stop,                   true,      true,       false },
+    { "help",                   &help,                   true,      true,      false },
+    { "stop",                   &stop,                   true,      true,      false },
+    { "getbestblockhash",       &getbestblockhash,       true,      false,     false },
+    { "getblockcount",          &getblockcount,          true,      false,     false },
+    { "getconnectioncount",     &getconnectioncount,     true,      false,     false },
+    { "getpeerinfo",            &getpeerinfo,            true,      false,     false },
+    { "addnode",                &addnode,                true,      true,      false },
+    { "getaddednodeinfo",       &getaddednodeinfo,       true,      true,      false },
+    { "ping",                   &ping,                   true,      false,     false },
+    { "getnettotals",           &getnettotals,           true,      true,      false },
+    { "getdifficulty",          &getdifficulty,          true,      false,     false },
+    { "getinfo",                &getinfo,                true,      false,     false },
+    { "getrawmempool",          &getrawmempool,          true,      false,     false },
+    { "getblock",               &getblock,               false,     false,     false },
+    { "getblockbynumber",       &getblockbynumber,       false,     false,     false },
+    { "getblockhash",           &getblockhash,           false,     false,     false },
+    { "getrawtransaction",      &getrawtransaction,      false,     false,     false },
+    { "createrawtransaction",   &createrawtransaction,   false,     false,     false },
+    { "decoderawtransaction",   &decoderawtransaction,   false,     false,     false },
+    { "decodescript",           &decodescript,           false,     false,     false },
+    { "signrawtransaction",     &signrawtransaction,     false,     false,     false },
+    { "sendrawtransaction",     &sendrawtransaction,     false,     false,     false },
+    { "getcheckpoint",          &getcheckpoint,          true,      false,     false },
+    { "sendalert",              &sendalert,              false,     false,     false },
+    { "validateaddress",        &validateaddress,        true,      false,     false },
+    { "validatepubkey",         &validatepubkey,         true,      false,     false },
+    { "verifymessage",          &verifymessage,          false,     false,     false },
+    { "searchrawtransactions",  &searchrawtransactions,  false,     false, false },
 
-    /* P2P networking */
-    { "getnetworkinfo",         &getnetworkinfo,         true,      false,      false },
-    { "addnode",                &addnode,                true,      true,       false },
-    { "getaddednodeinfo",       &getaddednodeinfo,       true,      true,       false },
-    { "getconnectioncount",     &getconnectioncount,     true,      false,      false },
-    { "getnettotals",           &getnettotals,           true,      true,       false },
-    { "getpeerinfo",            &getpeerinfo,            true,      false,      false },
-    { "ping",                   &ping,                   true,      false,      false },
-
-    /* Block chain and UTXO */
-    { "getblockchaininfo",      &getblockchaininfo,      true,      false,      false },
-    { "getbestblockhash",       &getbestblockhash,       true,      false,      false },
-    { "getblockcount",          &getblockcount,          true,      false,      false },
-    { "getblock",               &getblock,               false,     false,      false },
-    { "getblockheader",         &getblockheader,         false,     false,      false },
-    { "getblockhash",           &getblockhash,           false,     false,      false },
-    { "getdifficulty",          &getdifficulty,          true,      false,      false },
-    { "getrawmempool",          &getrawmempool,          true,      false,      false },
-    { "gettxout",               &gettxout,               true,      false,      false },
-    { "gettxoutsetinfo",        &gettxoutsetinfo,        true,      false,      false },
-    { "verifychain",            &verifychain,            true,      false,      false },
-
-    /* Mining */
-    { "getblocktemplate",       &getblocktemplate,       true,      false,      false },
-    { "getmininginfo",          &getmininginfo,          true,      false,      false },
-    { "getnetworkhashps",       &getnetworkhashps,       true,      false,      false },
-    { "submitblock",            &submitblock,            false,     false,      false },
-
-    /* Raw transactions */
-    { "createrawtransaction",   &createrawtransaction,   false,     false,      false },
-    { "decoderawtransaction",   &decoderawtransaction,   false,     false,      false },
-    { "decodescript",           &decodescript,           false,     false,      false },
-    { "getrawtransaction",      &getrawtransaction,      false,     false,      false },
-    { "sendrawtransaction",     &sendrawtransaction,     false,     false,      false },
-    { "signrawtransaction",     &signrawtransaction,     false,     false,      false }, /* uses wallet if enabled */
-
-    /* Utility functions */
-    { "createmultisig",         &createmultisig,         true,      true ,      false },
-    { "validateaddress",        &validateaddress,        true,      false,      false }, /* uses wallet if enabled */
-    { "verifymessage",          &verifymessage,          false,     false,      false },
-
-    /* Dash features */
+/* Dark features */
+    { "darksend",               &darksend,               false,     false,      true },
     { "spork",                  &spork,                  true,      false,      false },
-    { "masternode",             &masternode,             true,      false,      true  },
-    { "masternodelist",         &masternodelist,         true,      false,      false },
-#ifdef ENABLE_WALLET
-    { "darksend",               &darksend,               false,     false,      true  },
-
-    /* Wallet */
-    { "addmultisigaddress",     &addmultisigaddress,     false,     false,      true },
-    { "backupwallet",           &backupwallet,           true,      false,      true },
-    { "dumpprivkey",            &dumpprivkey,            true,      false,      true },
-    { "dumpwallet",             &dumpwallet,             true,      false,      true },
-    { "encryptwallet",          &encryptwallet,          false,     false,      true },
-    { "getaccountaddress",      &getaccountaddress,      true,      false,      true },
-    { "getaccount",             &getaccount,             false,     false,      true },
-    { "getaddressesbyaccount",  &getaddressesbyaccount,  true,      false,      true },
-    { "getbalance",             &getbalance,             false,     false,      true },
-    { "getnewaddress",          &getnewaddress,          true,      false,      true },
-    { "getrawchangeaddress",    &getrawchangeaddress,    true,      false,      true },
-    { "getreceivedbyaccount",   &getreceivedbyaccount,   false,     false,      true },
-    { "getreceivedbyaddress",   &getreceivedbyaddress,   false,     false,      true },
-    { "gettransaction",         &gettransaction,         false,     false,      true },
-    { "getunconfirmedbalance",  &getunconfirmedbalance,  false,     false,      true },
-    { "getwalletinfo",          &getwalletinfo,          true,      false,      true },
-    { "importprivkey",          &importprivkey,          false,     false,      true },
-    { "importwallet",           &importwallet,           false,     false,      true },
+    { "masternode",             &masternode,             true,      false,      true },
     { "keepass",                &keepass,                false,     false,      true },
-    { "keypoolrefill",          &keypoolrefill,          true,      false,      true },
-    { "listaccounts",           &listaccounts,           false,     false,      true },
-    { "listaddressgroupings",   &listaddressgroupings,   false,     false,      true },
-    { "listlockunspent",        &listlockunspent,        false,     false,      true },
-    { "listreceivedbyaccount",  &listreceivedbyaccount,  false,     false,      true },
-    { "listreceivedbyaddress",  &listreceivedbyaddress,  false,     false,      true },
-    { "listsinceblock",         &listsinceblock,         false,     false,      true },
-    { "listtransactions",       &listtransactions,       false,     false,      true },
-    { "listunspent",            &listunspent,            false,     false,      true },
-    { "lockunspent",            &lockunspent,            false,     false,      true },
-    { "move",                   &movecmd,                false,     false,      true },
-    { "sendfrom",               &sendfrom,               false,     false,      true },
-    { "sendmany",               &sendmany,               false,     false,      true },
-    { "sendtoaddress",          &sendtoaddress,          false,     false,      true },
-    { "setaccount",             &setaccount,             true,      false,      true },
-    { "settxfee",               &settxfee,               false,     false,      true },
-    { "signmessage",            &signmessage,            false,     false,      true },
-    { "walletlock",             &walletlock,             true,      false,      true },
-    { "walletpassphrasechange", &walletpassphrasechange, false,     false,      true },
-    { "walletpassphrase",       &walletpassphrase,       true,      false,      true },
 
-    /* Wallet-enabled mining */
-    { "getgenerate",            &getgenerate,            true,      false,      false },
-    { "gethashespersec",        &gethashespersec,        true,      false,      false },
-    { "getwork",                &getwork,                true,      false,      true  },
-    { "setgenerate",            &setgenerate,            true,      true,       false },
-
-#endif // ENABLE_WALLET
+#ifdef ENABLE_WALLET
+    { "getmininginfo",          &getmininginfo,          true,      false,     false },
+    { "getstakinginfo",         &getstakinginfo,         true,      false,     false },
+    { "getnewaddress",          &getnewaddress,          true,      false,     true },
+    { "getnewpubkey",           &getnewpubkey,           true,      false,     true },
+    { "getaccountaddress",      &getaccountaddress,      true,      false,     true },
+    { "setaccount",             &setaccount,             true,      false,     true },
+    { "getaccount",             &getaccount,             false,     false,     true },
+    { "getaddressesbyaccount",  &getaddressesbyaccount,  true,      false,     true },
+    { "sendtoaddress",          &sendtoaddress,          false,     false,     true },
+    { "getreceivedbyaddress",   &getreceivedbyaddress,   false,     false,     true },
+    { "getreceivedbyaccount",   &getreceivedbyaccount,   false,     false,     true },
+    { "listreceivedbyaddress",  &listreceivedbyaddress,  false,     false,     true },
+    { "listreceivedbyaccount",  &listreceivedbyaccount,  false,     false,     true },
+    { "backupwallet",           &backupwallet,           true,      false,     true },
+    { "keypoolrefill",          &keypoolrefill,          true,      false,     true },
+    { "walletpassphrase",       &walletpassphrase,       true,      false,     true },
+    { "walletpassphrasechange", &walletpassphrasechange, false,     false,     true },
+    { "walletlock",             &walletlock,             true,      false,     true },
+    { "encryptwallet",          &encryptwallet,          false,     false,     true },
+    { "getbalance",             &getbalance,             false,     false,     true },
+    { "move",                   &movecmd,                false,     false,     true },
+    { "sendfrom",               &sendfrom,               false,     false,     true },
+    { "sendmany",               &sendmany,               false,     false,     true },
+    { "addmultisigaddress",     &addmultisigaddress,     false,     false,     true },
+    { "addredeemscript",        &addredeemscript,        false,     false,     true },
+    { "gettransaction",         &gettransaction,         false,     false,     true },
+    { "listtransactions",       &listtransactions,       false,     false,     true },
+    { "listaddressgroupings",   &listaddressgroupings,   false,     false,     true },
+    { "signmessage",            &signmessage,            false,     false,     true },
+    { "getwork",                &getwork,                true,      false,     true },
+    { "getworkex",              &getworkex,              true,      false,     true },
+    { "listaccounts",           &listaccounts,           false,     false,     true },
+    { "getblocktemplate",       &getblocktemplate,       true,      false,     false },
+    { "submitblock",            &submitblock,            false,     false,     false },
+    { "listsinceblock",         &listsinceblock,         false,     false,     true },
+    { "dumpprivkey",            &dumpprivkey,            false,     false,     true },
+    { "dumpwallet",             &dumpwallet,             true,      false,     true },
+    { "importprivkey",          &importprivkey,          false,     false,     true },
+    { "importwallet",           &importwallet,           false,     false,     true },
+    { "listunspent",            &listunspent,            false,     false,     true },
+    { "settxfee",               &settxfee,               false,     false,     true },
+    { "getsubsidy",             &getsubsidy,             true,      true,      false },
+    { "getstakesubsidy",        &getstakesubsidy,        true,      true,      false },
+    { "reservebalance",         &reservebalance,         false,     true,      true },
+    { "checkwallet",            &checkwallet,            false,     true,      true },
+    { "repairwallet",           &repairwallet,           false,     true,      true },
+    { "resendtx",               &resendtx,               false,     true,      true },
+    { "makekeypair",            &makekeypair,            false,     true,      false },
+    { "checkkernel",            &checkkernel,            true,      false,     true },
+    { "getnewstealthaddress",   &getnewstealthaddress,   false,  false, true},
+    { "liststealthaddresses",   &liststealthaddresses,   false,  false, true},
+    { "importstealthaddress",   &importstealthaddress,   false,  false, true},
+    { "sendtostealthaddress",   &sendtostealthaddress,   false,  false, true},
+#endif
 };
 
 CRPCTable::CRPCTable()
@@ -446,7 +429,7 @@ template <typename Protocol, typename SocketAcceptorService>
 static void RPCAcceptHandler(boost::shared_ptr< basic_socket_acceptor<Protocol, SocketAcceptorService> > acceptor,
                              ssl::context& context,
                              bool fUseSSL,
-                             boost::shared_ptr< AcceptedConnection > conn,
+                             AcceptedConnection* conn,
                              const boost::system::error_code& error);
 
 /**
@@ -458,7 +441,7 @@ static void RPCListen(boost::shared_ptr< basic_socket_acceptor<Protocol, SocketA
                    const bool fUseSSL)
 {
     // Accept connection
-    boost::shared_ptr< AcceptedConnectionImpl<Protocol> > conn(new AcceptedConnectionImpl<Protocol>(acceptor->get_io_service(), context, fUseSSL));
+    AcceptedConnectionImpl<Protocol>* conn = new AcceptedConnectionImpl<Protocol>(acceptor->get_io_service(), context, fUseSSL);
 
     acceptor->async_accept(
             conn->sslStream.lowest_layer(),
@@ -468,7 +451,7 @@ static void RPCListen(boost::shared_ptr< basic_socket_acceptor<Protocol, SocketA
                 boost::ref(context),
                 fUseSSL,
                 conn,
-                _1));
+                boost::asio::placeholders::error));
 }
 
 
@@ -479,20 +462,21 @@ template <typename Protocol, typename SocketAcceptorService>
 static void RPCAcceptHandler(boost::shared_ptr< basic_socket_acceptor<Protocol, SocketAcceptorService> > acceptor,
                              ssl::context& context,
                              const bool fUseSSL,
-                             boost::shared_ptr< AcceptedConnection > conn,
+                             AcceptedConnection* conn,
                              const boost::system::error_code& error)
 {
     // Immediately start accepting new connections, except when we're cancelled or our socket is closed.
     if (error != asio::error::operation_aborted && acceptor->is_open())
         RPCListen(acceptor, context, fUseSSL);
 
-    AcceptedConnectionImpl<ip::tcp>* tcp_conn = dynamic_cast< AcceptedConnectionImpl<ip::tcp>* >(conn.get());
+    AcceptedConnectionImpl<ip::tcp>* tcp_conn = dynamic_cast< AcceptedConnectionImpl<ip::tcp>* >(conn);
 
+    // TODO: Actually handle errors
     if (error)
     {
-        // TODO: Actually handle errors
-        LogPrintf("%s: Error: %s\n", __func__, error.message());
+        delete conn;
     }
+
     // Restrict callers by IP.  It is important to
     // do this before starting client thread, to filter out
     // certain DoS and misbehaving clients.
@@ -501,11 +485,12 @@ static void RPCAcceptHandler(boost::shared_ptr< basic_socket_acceptor<Protocol, 
         // Only send a 403 if we're not using SSL to prevent a DoS during the SSL handshake.
         if (!fUseSSL)
             conn->stream() << HTTPReply(HTTP_FORBIDDEN, "", false) << std::flush;
-        conn->close();
+        delete conn;
     }
     else {
-        ServiceConnection(conn.get());
+        ServiceConnection(conn);
         conn->close();
+        delete conn;
     }
 }
 
@@ -517,7 +502,7 @@ void StartRPCThreads()
     {
         unsigned char rand_pwd[32];
         RAND_bytes(rand_pwd, 32);
-        string strWhatAmI = "To use dashd";
+        string strWhatAmI = "To use blackhatd";
         if (mapArgs.count("-server"))
             strWhatAmI = strprintf(_("To use the %s option"), "\"-server\"");
         else if (mapArgs.count("-daemon"))
@@ -526,13 +511,13 @@ void StartRPCThreads()
             _("%s, you must set a rpcpassword in the configuration file:\n"
               "%s\n"
               "It is recommended you use the following random password:\n"
-              "rpcuser=dashrpc\n"
+              "rpcuser=blackhatrpc\n"
               "rpcpassword=%s\n"
               "(you do not need to remember this password)\n"
               "The username and password MUST NOT be the same.\n"
               "If the file does not exist, create it with owner-readable-only file permissions.\n"
               "It is also recommended to set alertnotify so you are notified of problems;\n"
-              "for example: alertnotify=echo %%s | mail -s \"Dash Alert\" admin@foo.com\n"),
+              "for example: alertnotify=echo %%s | mail -s \"BlackHat Alert\" admin@foo.com\n"),
                 strWhatAmI,
                 GetConfigFile().string(),
                 EncodeBase58(&rand_pwd[0],&rand_pwd[0]+32)),
@@ -549,7 +534,7 @@ void StartRPCThreads()
 
     if (fUseSSL)
     {
-        rpc_ssl_context->set_options(ssl::context::no_sslv2 | ssl::context::no_sslv3);
+        rpc_ssl_context->set_options(ssl::context::no_sslv2);
 
         filesystem::path pathCertFile(GetArg("-rpcsslcertificatechainfile", "server.cert"));
         if (!pathCertFile.is_complete()) pathCertFile = filesystem::path(GetDataDir()) / pathCertFile;
@@ -570,12 +555,12 @@ void StartRPCThreads()
     asio::ip::address bindAddress = loopback ? asio::ip::address_v6::loopback() : asio::ip::address_v6::any();
     ip::tcp::endpoint endpoint(bindAddress, GetArg("-rpcport", Params().RPCPort()));
     boost::system::error_code v6_only_error;
+    boost::shared_ptr<ip::tcp::acceptor> acceptor(new ip::tcp::acceptor(*rpc_io_service));
 
     bool fListening = false;
     std::string strerr;
     try
     {
-        boost::shared_ptr<ip::tcp::acceptor> acceptor(new ip::tcp::acceptor(*rpc_io_service));
         acceptor->open(endpoint.protocol());
         acceptor->set_option(boost::asio::ip::tcp::acceptor::reuse_address(true));
 
@@ -587,13 +572,13 @@ void StartRPCThreads()
 
         RPCListen(acceptor, *rpc_ssl_context, fUseSSL);
 
-        rpc_acceptors.push_back(acceptor);
         fListening = true;
     }
     catch(boost::system::system_error &e)
     {
         strerr = strprintf(_("An error occurred while setting up the RPC port %u for listening on IPv6, falling back to IPv4: %s"), endpoint.port(), e.what());
     }
+
     try {
         // If dual IPv6/IPv4 failed (or we're opening loopback interfaces only), open IPv4 separately
         if (!fListening || loopback || v6_only_error)
@@ -601,7 +586,7 @@ void StartRPCThreads()
             bindAddress = loopback ? asio::ip::address_v4::loopback() : asio::ip::address_v4::any();
             endpoint.address(bindAddress);
 
-            boost::shared_ptr<ip::tcp::acceptor> acceptor(new ip::tcp::acceptor(*rpc_io_service));
+            acceptor.reset(new ip::tcp::acceptor(*rpc_io_service));
             acceptor->open(endpoint.protocol());
             acceptor->set_option(boost::asio::ip::tcp::acceptor::reuse_address(true));
             acceptor->bind(endpoint);
@@ -609,7 +594,6 @@ void StartRPCThreads()
 
             RPCListen(acceptor, *rpc_ssl_context, fUseSSL);
 
-            rpc_acceptors.push_back(acceptor);
             fListening = true;
         }
     }
@@ -629,46 +613,14 @@ void StartRPCThreads()
         rpc_worker_group->create_thread(boost::bind(&asio::io_service::run, rpc_io_service));
 }
 
-void StartDummyRPCThread()
-{
-    if(rpc_io_service == NULL)
-    {
-        rpc_io_service = new asio::io_service();
-        /* Create dummy "work" to keep the thread from exiting when no timeouts active,
-         * see http://www.boost.org/doc/libs/1_51_0/doc/html/boost_asio/reference/io_service.html#boost_asio.reference.io_service.stopping_the_io_service_from_running_out_of_work */
-        rpc_dummy_work = new asio::io_service::work(*rpc_io_service);
-        rpc_worker_group = new boost::thread_group();
-        rpc_worker_group->create_thread(boost::bind(&asio::io_service::run, rpc_io_service));
-    }
-}
-
 void StopRPCThreads()
 {
     if (rpc_io_service == NULL) return;
 
-    // First, cancel all timers and acceptors
-    // This is not done automatically by ->stop(), and in some cases the destructor of
-    // asio::io_service can hang if this is skipped.
-    boost::system::error_code ec;
-    BOOST_FOREACH(const boost::shared_ptr<ip::tcp::acceptor> &acceptor, rpc_acceptors)
-    {
-        acceptor->cancel(ec);
-        if (ec)
-            LogPrintf("%s: Warning: %s when cancelling acceptor", __func__, ec.message());
-    }
-    rpc_acceptors.clear();
-    BOOST_FOREACH(const PAIRTYPE(std::string, boost::shared_ptr<deadline_timer>) &timer, deadlineTimers)
-    {
-        timer.second->cancel(ec);
-        if (ec)
-            LogPrintf("%s: Warning: %s when cancelling timer", __func__, ec.message());
-    }
     deadlineTimers.clear();
-
     rpc_io_service->stop();
     if (rpc_worker_group != NULL)
         rpc_worker_group->join_all();
-    delete rpc_dummy_work; rpc_dummy_work = NULL;
     delete rpc_worker_group; rpc_worker_group = NULL;
     delete rpc_ssl_context; rpc_ssl_context = NULL;
     delete rpc_io_service; rpc_io_service = NULL;
@@ -722,7 +674,7 @@ void JSONRequest::parse(const Value& valRequest)
         throw JSONRPCError(RPC_INVALID_REQUEST, "Method must be a string");
     strMethod = valMethod.get_str();
     if (strMethod != "getwork" && strMethod != "getblocktemplate")
-        LogPrint("rpc", "ThreadRPCServer method=%s\n", SanitizeString(strMethod));
+        LogPrint("rpc", "ThreadRPCServer method=%s\n", strMethod);
 
     // Parse params
     Value valParams = find_value(request, "params");
@@ -771,7 +723,7 @@ static string JSONRPCExecBatch(const Array& vReq)
 void ServiceConnection(AcceptedConnection *conn)
 {
     bool fRun = true;
-    while (fRun && !ShutdownRequested())
+    while (fRun)
     {
         int nProto = 0;
         map<string, string> mapHeaders;
@@ -782,7 +734,7 @@ void ServiceConnection(AcceptedConnection *conn)
             break;
 
         // Read HTTP message headers and body
-        ReadHTTPMessage(conn->stream(), mapHeaders, strRequest, nProto);
+        ReadHTTPMessage(conn->stream(), mapHeaders, strRequest, nProto, MAX_SIZE);
 
         if (strURI != "/") {
             conn->stream() << HTTPReply(HTTP_NOT_FOUND, "", false) << std::flush;
@@ -895,15 +847,6 @@ json_spirit::Value CRPCTable::execute(const std::string &strMethod, const json_s
     {
         throw JSONRPCError(RPC_MISC_ERROR, e.what());
     }
-}
-
-std::string HelpExampleCli(string methodname, string args){
-    return "> dash-cli " + methodname + " " + args + "\n";
-}
-
-std::string HelpExampleRpc(string methodname, string args){
-    return "> curl --user myusername --data-binary '{\"jsonrpc\": \"1.0\", \"id\":\"curltest\", "
-        "\"method\": \"" + methodname + "\", \"params\": [" + args + "] }' -H 'content-type: text/plain;' http://127.0.0.1:9998/\n";
 }
 
 const CRPCTable tableRPC;

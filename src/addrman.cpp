@@ -3,9 +3,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include "addrman.h"
-
 #include "hash.h"
-#include "serialize.h"
 
 using namespace std;
 
@@ -14,12 +12,12 @@ int CAddrInfo::GetTriedBucket(const std::vector<unsigned char> &nKey) const
     CDataStream ss1(SER_GETHASH, 0);
     std::vector<unsigned char> vchKey = GetKey();
     ss1 << nKey << vchKey;
-    uint64_t hash1 = Hash(ss1.begin(), ss1.end()).GetLow64();
+    uint64_t hash1 = Hash(ss1.begin(), ss1.end()).Get64();
 
     CDataStream ss2(SER_GETHASH, 0);
     std::vector<unsigned char> vchGroupKey = GetGroup();
     ss2 << nKey << vchGroupKey << (hash1 % ADDRMAN_TRIED_BUCKETS_PER_GROUP);
-    uint64_t hash2 = Hash(ss2.begin(), ss2.end()).GetLow64();
+    uint64_t hash2 = Hash(ss2.begin(), ss2.end()).Get64();
     return hash2 % ADDRMAN_TRIED_BUCKET_COUNT;
 }
 
@@ -29,11 +27,11 @@ int CAddrInfo::GetNewBucket(const std::vector<unsigned char> &nKey, const CNetAd
     std::vector<unsigned char> vchGroupKey = GetGroup();
     std::vector<unsigned char> vchSourceGroupKey = src.GetGroup();
     ss1 << nKey << vchGroupKey << vchSourceGroupKey;
-    uint64_t hash1 = Hash(ss1.begin(), ss1.end()).GetLow64();
+    uint64_t hash1 = Hash(ss1.begin(), ss1.end()).Get64();
 
     CDataStream ss2(SER_GETHASH, 0);
     ss2 << nKey << vchSourceGroupKey << (hash1 % ADDRMAN_NEW_BUCKETS_PER_SOURCE_GROUP);
-    uint64_t hash2 = Hash(ss2.begin(), ss2.end()).GetLow64();
+    uint64_t hash2 = Hash(ss2.begin(), ss2.end()).Get64();
     return hash2 % ADDRMAN_NEW_BUCKET_COUNT;
 }
 
@@ -45,13 +43,13 @@ bool CAddrInfo::IsTerrible(int64_t nNow) const
     if (nTime > nNow + 10*60) // came in a flying DeLorean
         return true;
 
-    if (nTime==0 || nNow-nTime > ADDRMAN_HORIZON_DAYS*86400) // not seen in over a month
+    if (nTime==0 || nNow-nTime > ADDRMAN_HORIZON_DAYS*24*60*60) // not seen in recent history
         return true;
 
-    if (nLastSuccess==0 && nAttempts>=ADDRMAN_RETRIES) // tried three times and never a success
+    if (nLastSuccess==0 && nAttempts>=ADDRMAN_RETRIES) // tried N times and never a success
         return true;
 
-    if (nNow-nLastSuccess > ADDRMAN_MIN_FAIL_DAYS*86400 && nAttempts>=ADDRMAN_MAX_FAILURES) // 10 successive failures in the last week
+    if (nNow-nLastSuccess > ADDRMAN_MIN_FAIL_DAYS*24*60*60 && nAttempts>=ADDRMAN_MAX_FAILURES) // N successive failures in the last week
         return true;
 
     return false;
@@ -492,17 +490,23 @@ int CAddrMan::Check_()
 
 void CAddrMan::GetAddr_(std::vector<CAddress> &vAddr)
 {
-    int nNodes = ADDRMAN_GETADDR_MAX_PCT*vRandom.size()/100;
+    unsigned int nNodes = ADDRMAN_GETADDR_MAX_PCT * vRandom.size() / 100;
     if (nNodes > ADDRMAN_GETADDR_MAX)
         nNodes = ADDRMAN_GETADDR_MAX;
 
-    // perform a random shuffle over the first nNodes elements of vRandom (selecting from all)
-    for (int n = 0; n<nNodes; n++)
+    // gather a list of random nodes, skipping those of low quality
+    for (unsigned int n = 0; n < vRandom.size(); n++)
     {
+        if (vAddr.size() >= nNodes)
+            break;
+
         int nRndPos = GetRandInt(vRandom.size() - n) + n;
         SwapRandom(n, nRndPos);
         assert(mapInfo.count(vRandom[n]) == 1);
-        vAddr.push_back(mapInfo[vRandom[n]]);
+
+        const CAddrInfo& ai = mapInfo[vRandom[n]];
+        if (!ai.IsTerrible())
+            vAddr.push_back(ai);
     }
 }
 

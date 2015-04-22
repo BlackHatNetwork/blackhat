@@ -1,7 +1,3 @@
-// Copyright (c) 2011-2013 The Bitcoin developers
-// Distributed under the MIT/X11 software license, see the accompanying
-// file COPYING or http://www.opensource.org/licenses/mit-license.php.
-
 #ifndef TRANSACTIONRECORD_H
 #define TRANSACTIONRECORD_H
 
@@ -51,17 +47,14 @@ public:
     /** @name Reported status
        @{*/
     Status status;
-    qint64 depth;
-    qint64 open_for; /**< Timestamp if status==OpenUntilDate, otherwise number
-                      of additional blocks that need to be mined before
-                      finalization */
+    int64_t depth;
+    int64_t open_for; /**< Timestamp if status==OpenUntilDate, otherwise number
+                       of additional blocks that need to be mined before
+                       finalization */
     /**@}*/
 
     /** Current number of blocks (to know whether cached status is still valid) */
     int cur_num_blocks;
-
-    //** Know when to update transaction for ix locks **/
-    int cur_num_ix_locks;
 };
 
 /** UI model for a transaction. A core transaction can be represented by multiple UI transactions if it has
@@ -78,32 +71,26 @@ public:
         SendToOther,
         RecvWithAddress,
         RecvFromOther,
-        SendToSelf,
-        RecvWithDarksend,
-        DarksendDenominate,
-        DarksendCollateralPayment,
-        DarksendMakeCollaterals,
-        DarksendCreateDenominations,
-        Darksent
+        SendToSelf
     };
 
     /** Number of confirmation recommended for accepting a transaction */
-    static const int RecommendedNumConfirmations = 6;
+    static const int RecommendedNumConfirmations = 10;
 
     TransactionRecord():
             hash(), time(0), type(Other), address(""), debit(0), credit(0), idx(0)
     {
     }
 
-    TransactionRecord(uint256 hash, qint64 time):
+    TransactionRecord(uint256 hash, int64_t time):
             hash(hash), time(time), type(Other), address(""), debit(0),
             credit(0), idx(0)
     {
     }
 
-    TransactionRecord(uint256 hash, qint64 time,
+    TransactionRecord(uint256 hash, int64_t time,
                 Type type, const std::string &address,
-                qint64 debit, qint64 credit):
+                int64_t debit, int64_t credit):
             hash(hash), time(time), type(type), address(address), debit(debit), credit(credit),
             idx(0)
     {

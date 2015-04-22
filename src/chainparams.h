@@ -8,6 +8,7 @@
 
 #include "bignum.h"
 #include "uint256.h"
+#include "util.h"
 
 #include <vector>
 
@@ -26,7 +27,7 @@ struct CDNSSeedData {
 
 /**
  * CChainParams defines various tweakable parameters of a given instance of the
- * Dash system. There are three: the main network on which people trade goods
+ * Bitcoin system. There are three: the main network on which people trade goods
  * and services, the public test network which gets reset from time to time and
  * a regression test mode which is intended for private networks only. It has
  * minimal difficulty to ensure that blocks can be found instantly.
@@ -45,10 +46,9 @@ public:
     enum Base58Type {
         PUBKEY_ADDRESS,
         SCRIPT_ADDRESS,
-        SECRET_KEY,     // BIP16
-        EXT_PUBLIC_KEY, // BIP32
-        EXT_SECRET_KEY, // BIP32
-        EXT_COIN_TYPE,  // BIP44
+        SECRET_KEY,
+        EXT_PUBLIC_KEY,
+        EXT_SECRET_KEY,
 
         MAX_BASE58_TYPES
     };
@@ -67,8 +67,9 @@ public:
     const std::vector<unsigned char> &Base58Prefix(Base58Type type) const { return base58Prefixes[type]; }
     virtual const vector<CAddress>& FixedSeeds() const = 0;
     int RPCPort() const { return nRPCPort; }
+    int LastPOWBlock() const { return nLastPOWBlock; }
 protected:
-    CChainParams() {}
+    CChainParams() {};
 
     uint256 hashGenesisBlock;
     MessageStartChars pchMessageStart;
@@ -81,6 +82,7 @@ protected:
     string strDataDir;
     vector<CDNSSeedData> vSeeds;
     std::vector<unsigned char> base58Prefixes[MAX_BASE58_TYPES];
+    int nLastPOWBlock;
 };
 
 /**
@@ -101,10 +103,6 @@ bool SelectParamsFromCommandLine();
 inline bool TestNet() {
     // Note: it's deliberate that this returns "false" for regression test mode.
     return Params().NetworkID() == CChainParams::TESTNET;
-}
-
-inline bool RegTest() {
-    return Params().NetworkID() == CChainParams::REGTEST;
 }
 
 #endif

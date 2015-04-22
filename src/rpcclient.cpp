@@ -1,9 +1,9 @@
 // Copyright (c) 2010 Satoshi Nakamoto
-// Copyright (c) 2009-2014 The Bitcoin developers
-// Copyright (c) 2014-2015 The Dash developers
+// Copyright (c) 2009-2013 The Bitcoin developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
+#include <set>
 #include "rpcclient.h"
 
 #include "rpcprotocol.h"
@@ -21,6 +21,7 @@
 #include <boost/foreach.hpp>
 #include <boost/iostreams/concepts.hpp>
 #include <boost/iostreams/stream.hpp>
+#include <boost/lexical_cast.hpp>
 #include <boost/shared_ptr.hpp>
 #include "json/json_spirit_writer_template.h"
 
@@ -35,13 +36,13 @@ Object CallRPC(const string& strMethod, const Array& params)
         throw runtime_error(strprintf(
             _("You must set rpcpassword=<password> in the configuration file:\n%s\n"
               "If the file does not exist, create it with owner-readable-only file permissions."),
-                GetConfigFile().string().c_str()));
+                GetConfigFile().string()));
 
     // Connect to localhost
     bool fUseSSL = GetBoolArg("-rpcssl", false);
     asio::io_service io_service;
     ssl::context context(io_service, ssl::context::sslv23);
-    context.set_options(ssl::context::no_sslv2 | ssl::context::no_sslv3);
+    context.set_options(ssl::context::no_sslv2);
     asio::ssl::stream<asio::ip::tcp::socket> sslStream(io_service, context);
     SSLIOStreamDevice<asio::ip::tcp> d(sslStream, fUseSSL);
     iostreams::stream< SSLIOStreamDevice<asio::ip::tcp> > stream(d);
@@ -73,7 +74,7 @@ Object CallRPC(const string& strMethod, const Array& params)
     // Receive HTTP reply message headers and body
     map<string, string> mapHeaders;
     string strReply;
-    ReadHTTPMessage(stream, mapHeaders, strReply, nProto);
+    ReadHTTPMessage(stream, mapHeaders, strReply, nProto, MAX_SIZE);
 
     if (nStatus == HTTP_UNAUTHORIZED)
         throw runtime_error("incorrect rpcuser or rpcpassword (authorization failed)");
@@ -93,93 +94,118 @@ Object CallRPC(const string& strMethod, const Array& params)
     return reply;
 }
 
-template<typename T>
-void ConvertTo(Value& value, bool fAllowNull=false)
+class CRPCConvertParam
 {
-    if (fAllowNull && value.type() == null_type)
-        return;
-    if (value.type() == str_type)
-    {
-        // reinterpret string as unquoted json value
-        Value value2;
-        string strJSON = value.get_str();
-        if (!read_string(strJSON, value2))
-            throw runtime_error(string("Error parsing JSON:")+strJSON);
-        ConvertTo<T>(value2, fAllowNull);
-        value = value2;
+public:
+    std::string methodName;            // method whose params want conversion
+    int paramIdx;                      // 0-based idx of param to convert
+};
+
+static const CRPCConvertParam vRPCConvertParams[] =
+{
+    { "stop", 0 },
+    { "getaddednodeinfo", 0 },
+    { "sendtoaddress", 1 },
+    { "settxfee", 0 },
+    { "getreceivedbyaddress", 1 },
+    { "getreceivedbyaccount", 1 },
+    { "listreceivedbyaddress", 0 },
+    { "listreceivedbyaddress", 1 },
+    { "listreceivedbyaccount", 0 },
+    { "listreceivedbyaccount", 1 },
+    { "getbalance", 1 },
+    { "getblock", 1 },
+    { "getblockbynumber", 0 },
+    { "getblockbynumber", 1 },
+    { "getblockhash", 0 },
+    { "move", 2 },
+    { "move", 3 },
+    { "sendfrom", 2 },
+    { "sendfrom", 3 },
+    { "listtransactions", 1 },
+    { "listtransactions", 2 },
+    { "listaccounts", 0 },
+    { "walletpassphrase", 1 },
+    { "walletpassphrase", 2 },
+    { "getblocktemplate", 0 },
+    { "listsinceblock", 1 },
+    { "sendalert", 2 },
+    { "sendalert", 3 },
+    { "sendalert", 4 },
+    { "sendalert", 5 },
+    { "sendalert", 6 },
+    { "sendmany", 1 },
+    { "sendmany", 2 },
+    { "reservebalance", 0 },
+    { "reservebalance", 1 },
+    { "addmultisigaddress", 0 },
+    { "addmultisigaddress", 1 },
+    { "listunspent", 0 },
+    { "listunspent", 1 },
+    { "listunspent", 2 },
+    { "getrawtransaction", 1 },
+    { "createrawtransaction", 0 },
+    { "createrawtransaction", 1 },
+    { "signrawtransaction", 1 },
+    { "signrawtransaction", 2 },
+    { "keypoolrefill", 0 },
+    { "importprivkey", 2 },
+    { "checkkernel", 0 },
+    { "checkkernel", 1 },
+    { "sendtostealthaddress", 1 },
+    { "searchrawtransactions", 1 },
+    { "searchrawtransactions", 2 },
+    { "searchrawtransactions", 3 },
+};
+
+class CRPCConvertTable
+{
+private:
+    std::set<std::pair<std::string, int> > members;
+
+public:
+    CRPCConvertTable();
+
+    bool convert(const std::string& method, int idx) {
+        return (members.count(std::make_pair(method, idx)) > 0);
     }
-    else
-    {
-        value = value.get_value<T>();
+};
+
+CRPCConvertTable::CRPCConvertTable()
+{
+    const unsigned int n_elem =
+        (sizeof(vRPCConvertParams) / sizeof(vRPCConvertParams[0]));
+
+    for (unsigned int i = 0; i < n_elem; i++) {
+        members.insert(std::make_pair(vRPCConvertParams[i].methodName,
+                                      vRPCConvertParams[i].paramIdx));
     }
 }
+
+static CRPCConvertTable rpcCvtTable;
 
 // Convert strings to command-specific RPC representation
 Array RPCConvertValues(const std::string &strMethod, const std::vector<std::string> &strParams)
 {
     Array params;
-    BOOST_FOREACH(const std::string &param, strParams)
-        params.push_back(param);
 
-    int n = params.size();
+    for (unsigned int idx = 0; idx < strParams.size(); idx++) {
+        const std::string& strVal = strParams[idx];
 
-    //
-    // Special case non-string parameter types
-    //
-    if (strMethod == "stop"                   && n > 0) ConvertTo<bool>(params[0]);
-    if (strMethod == "getaddednodeinfo"       && n > 0) ConvertTo<bool>(params[0]);
-    if (strMethod == "setgenerate"            && n > 0) ConvertTo<bool>(params[0]);
-    if (strMethod == "setgenerate"            && n > 1) ConvertTo<int64_t>(params[1]);
-    if (strMethod == "getnetworkhashps"       && n > 0) ConvertTo<int64_t>(params[0]);
-    if (strMethod == "getnetworkhashps"       && n > 1) ConvertTo<int64_t>(params[1]);
-    if (strMethod == "sendtoaddress"          && n > 1) ConvertTo<double>(params[1]);
-    if (strMethod == "settxfee"               && n > 0) ConvertTo<double>(params[0]);
-    if (strMethod == "getreceivedbyaddress"   && n > 1) ConvertTo<int64_t>(params[1]);
-    if (strMethod == "getreceivedbyaccount"   && n > 1) ConvertTo<int64_t>(params[1]);
-    if (strMethod == "listreceivedbyaddress"  && n > 0) ConvertTo<int64_t>(params[0]);
-    if (strMethod == "listreceivedbyaddress"  && n > 1) ConvertTo<bool>(params[1]);
-    if (strMethod == "listreceivedbyaccount"  && n > 0) ConvertTo<int64_t>(params[0]);
-    if (strMethod == "listreceivedbyaccount"  && n > 1) ConvertTo<bool>(params[1]);
-    if (strMethod == "getbalance"             && n > 1) ConvertTo<int64_t>(params[1]);
-    if (strMethod == "getblockhash"           && n > 0) ConvertTo<int64_t>(params[0]);
-    if (strMethod == "move"                   && n > 2) ConvertTo<double>(params[2]);
-    if (strMethod == "move"                   && n > 3) ConvertTo<int64_t>(params[3]);
-    if (strMethod == "sendfrom"               && n > 2) ConvertTo<double>(params[2]);
-    if (strMethod == "sendfrom"               && n > 3) ConvertTo<int64_t>(params[3]);
-    if (strMethod == "listtransactions"       && n > 1) ConvertTo<int64_t>(params[1]);
-    if (strMethod == "listtransactions"       && n > 2) ConvertTo<int64_t>(params[2]);
-    if (strMethod == "listaccounts"           && n > 0) ConvertTo<int64_t>(params[0]);
-    if (strMethod == "walletpassphrase"       && n > 1) ConvertTo<int64_t>(params[1]);
-    if (strMethod == "walletpassphrase"       && n > 2) ConvertTo<bool>(params[2]);
-    if (strMethod == "getblocktemplate"       && n > 0) ConvertTo<Object>(params[0]);
-    if (strMethod == "listsinceblock"         && n > 1) ConvertTo<int64_t>(params[1]);
-    if (strMethod == "sendmany"               && n > 1) ConvertTo<Object>(params[1]);
-    if (strMethod == "sendmany"               && n > 2) ConvertTo<int64_t>(params[2]);
-    if (strMethod == "addmultisigaddress"     && n > 0) ConvertTo<int64_t>(params[0]);
-    if (strMethod == "addmultisigaddress"     && n > 1) ConvertTo<Array>(params[1]);
-    if (strMethod == "createmultisig"         && n > 0) ConvertTo<int64_t>(params[0]);
-    if (strMethod == "createmultisig"         && n > 1) ConvertTo<Array>(params[1]);
-    if (strMethod == "listunspent"            && n > 0) ConvertTo<int64_t>(params[0]);
-    if (strMethod == "listunspent"            && n > 1) ConvertTo<int64_t>(params[1]);
-    if (strMethod == "listunspent"            && n > 2) ConvertTo<Array>(params[2]);
-    if (strMethod == "getblock"               && n > 1) ConvertTo<bool>(params[1]);
-    if (strMethod == "getblockheader"         && n > 1) ConvertTo<bool>(params[1]);
-    if (strMethod == "getrawtransaction"      && n > 1) ConvertTo<int64_t>(params[1]);
-    if (strMethod == "createrawtransaction"   && n > 0) ConvertTo<Array>(params[0]);
-    if (strMethod == "createrawtransaction"   && n > 1) ConvertTo<Object>(params[1]);
-    if (strMethod == "signrawtransaction"     && n > 1) ConvertTo<Array>(params[1], true);
-    if (strMethod == "signrawtransaction"     && n > 2) ConvertTo<Array>(params[2], true);
-    if (strMethod == "sendrawtransaction"     && n > 1) ConvertTo<bool>(params[1], true);
-    if (strMethod == "gettxout"               && n > 1) ConvertTo<int64_t>(params[1]);
-    if (strMethod == "gettxout"               && n > 2) ConvertTo<bool>(params[2]);
-    if (strMethod == "lockunspent"            && n > 0) ConvertTo<bool>(params[0]);
-    if (strMethod == "lockunspent"            && n > 1) ConvertTo<Array>(params[1]);
-    if (strMethod == "importprivkey"          && n > 2) ConvertTo<bool>(params[2]);
-    if (strMethod == "verifychain"            && n > 0) ConvertTo<int64_t>(params[0]);
-    if (strMethod == "verifychain"            && n > 1) ConvertTo<int64_t>(params[1]);
-    if (strMethod == "keypoolrefill"          && n > 0) ConvertTo<int64_t>(params[0]);
-    if (strMethod == "getrawmempool"          && n > 0) ConvertTo<bool>(params[0]);
-    if (strMethod == "spork"                  && n > 1) ConvertTo<int64_t>(params[1]);
+        // insert string value directly
+        if (!rpcCvtTable.convert(strMethod, idx)) {
+            params.push_back(strVal);
+        }
+
+        // parse string as JSON, insert bool/number/object/etc. value
+        else {
+            Value jVal;
+            if (!read_string(strVal, jVal))
+                throw runtime_error(string("Error parsing JSON:")+strVal);
+            params.push_back(jVal);
+        }
+
+    }
 
     return params;
 }
@@ -236,11 +262,10 @@ int CommandLineRPC(int argc, char *argv[])
     }
     catch (std::exception& e) {
         strPrint = string("error: ") + e.what();
-        nRet = abs(RPC_MISC_ERROR);
+        nRet = 87;
     }
     catch (...) {
-        PrintExceptionContinue(NULL, "CommandLineRPC()");
-        throw;
+        PrintException(NULL, "CommandLineRPC()");
     }
 
     if (strPrint != "")
@@ -249,36 +274,3 @@ int CommandLineRPC(int argc, char *argv[])
     }
     return nRet;
 }
-
-std::string HelpMessageCli(bool mainProgram)
-{
-    string strUsage;
-    if(mainProgram)
-    {
-        strUsage += _("Options:") + "\n";
-        strUsage += "  -?                     " + _("This help message") + "\n";
-        strUsage += "  -conf=<file>           " + _("Specify configuration file (default: dash.conf)") + "\n";
-        strUsage += "  -datadir=<dir>         " + _("Specify data directory") + "\n";
-        strUsage += "  -testnet               " + _("Use the test network") + "\n";
-        strUsage += "  -regtest               " + _("Enter regression test mode, which uses a special chain in which blocks can be "
-                                                    "solved instantly. This is intended for regression testing tools and app development.") + "\n";
-    } else {
-        strUsage += _("RPC client options:") + "\n";
-    }
-
-    strUsage += "  -rpcconnect=<ip>       " + _("Send commands to node running on <ip> (default: 127.0.0.1)") + "\n";
-    strUsage += "  -rpcport=<port>        " + _("Connect to JSON-RPC on <port> (default: 9998 or testnet: 19998)") + "\n";
-    strUsage += "  -rpcwait               " + _("Wait for RPC server to start") + "\n";
-
-    if(mainProgram)
-    {
-        strUsage += "  -rpcuser=<user>        " + _("Username for JSON-RPC connections") + "\n";
-        strUsage += "  -rpcpassword=<pw>      " + _("Password for JSON-RPC connections") + "\n";
-
-        strUsage += "\n" + _("SSL options: (see the Bitcoin Wiki for SSL setup instructions)") + "\n";
-        strUsage += "  -rpcssl                " + _("Use OpenSSL (https) for JSON-RPC connections") + "\n";
-    }
-
-    return strUsage;
-}
-

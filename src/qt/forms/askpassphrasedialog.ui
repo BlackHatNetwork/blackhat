@@ -100,7 +100,7 @@
       </widget>
      </item>
      <item row="4" column="0">
-      <widget class="QCheckBox" name="anonymizationCheckBox">
+      <widget class="QCheckBox" name="stakingCheckBox">
        <property name="enabled">
         <bool>true</bool>
        </property>
@@ -108,7 +108,7 @@
         <string>Serves to disable the trivial sendmoney when OS account compromised. Provides no real security.</string>
        </property>
        <property name="text">
-        <string>For anonymization only</string>
+        <string>For staking only</string>
        </property>
        <property name="visible">
         <bool>false</bool>
@@ -138,12 +138,12 @@
    <slot>accept()</slot>
    <hints>
     <hint type="sourcelabel">
-     <x>20</x>
-     <y>20</y>
+     <x>248</x>
+     <y>254</y>
     </hint>
     <hint type="destinationlabel">
-     <x>20</x>
-     <y>20</y>
+     <x>157</x>
+     <y>274</y>
     </hint>
    </hints>
   </connection>
@@ -154,12 +154,12 @@
    <slot>reject()</slot>
    <hints>
     <hint type="sourcelabel">
-     <x>20</x>
-     <y>20</y>
+     <x>316</x>
+     <y>260</y>
     </hint>
     <hint type="destinationlabel">
-     <x>20</x>
-     <y>20</y>
+     <x>286</x>
+     <y>274</y>
     </hint>
    </hints>
   </connection>

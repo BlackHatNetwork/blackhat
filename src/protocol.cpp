@@ -1,11 +1,11 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2014 The Bitcoin developers
+// Copyright (c) 2009-2012 The Bitcoin developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include "protocol.h"
-
 #include "util.h"
+#include "netbase.h"
 
 #ifndef WIN32
 # include <arpa/inet.h>
@@ -16,24 +16,12 @@ static const char* ppszTypeName[] =
     "ERROR",
     "tx",
     "block",
-    "filtered block",
-    "tx lock request",
-    "tx lock vote",
-    "spork",
-    "masternode winner",
-    "unknown",
-    "unknown",
-    "unknown",
-    "unknown",
-    "unknown",
-    "unknown"
 };
 
 CMessageHeader::CMessageHeader()
 {
     memcpy(pchMessageStart, Params().MessageStart(), MESSAGE_START_SIZE);
     memset(pchCommand, 0, sizeof(pchCommand));
-    pchCommand[1] = 1;
     nMessageSize = -1;
     nChecksum = 0;
 }
@@ -41,6 +29,7 @@ CMessageHeader::CMessageHeader()
 CMessageHeader::CMessageHeader(const char* pszCommand, unsigned int nMessageSizeIn)
 {
     memcpy(pchMessageStart, Params().MessageStart(), MESSAGE_START_SIZE);
+    memset(pchCommand, 0, sizeof(pchCommand));
     strncpy(pchCommand, pszCommand, COMMAND_SIZE);
     nMessageSize = nMessageSizeIn;
     nChecksum = 0;
@@ -48,10 +37,7 @@ CMessageHeader::CMessageHeader(const char* pszCommand, unsigned int nMessageSize
 
 std::string CMessageHeader::GetCommand() const
 {
-    if (pchCommand[COMMAND_SIZE-1] == 0)
-        return std::string(pchCommand, pchCommand + strlen(pchCommand));
-    else
-        return std::string(pchCommand, pchCommand + COMMAND_SIZE);
+    return std::string(pchCommand, pchCommand + strnlen(pchCommand, COMMAND_SIZE));
 }
 
 bool CMessageHeader::IsValid() const
@@ -153,9 +139,3 @@ std::string CInv::ToString() const
 {
     return strprintf("%s %s", GetCommand(), hash.ToString());
 }
-
-void CInv::print() const
-{
-    LogPrintf("CInv(%s)\n", ToString());
-}
-

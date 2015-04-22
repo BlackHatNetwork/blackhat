@@ -1,16 +1,25 @@
-// Copyright (c) 2009-2013 The Bitcoin developers
+// Copyright (c) 2009-2012 The Bitcoin Developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include "crypter.h"
 
 #include "script.h"
+#include "scrypt.h"
 
 #include <string>
 #include <vector>
 #include <boost/foreach.hpp>
+#include <openssl/crypto.h>
+#include <openssl/ec.h>
+#include <openssl/ecdh.h>
+#include <openssl/sha.h>
 #include <openssl/aes.h>
 #include <openssl/evp.h>
+#include <openssl/hmac.h>
+#ifdef WIN32
+#include <windows.h>
+#endif
 
 bool CCrypter::SetKeyFromPassphrase(const SecureString& strKeyData, const std::vector<unsigned char>& chSalt, const unsigned int nRounds, const unsigned int nDerivationMethod)
 {
@@ -19,8 +28,21 @@ bool CCrypter::SetKeyFromPassphrase(const SecureString& strKeyData, const std::v
 
     int i = 0;
     if (nDerivationMethod == 0)
+    {
         i = EVP_BytesToKey(EVP_aes_256_cbc(), EVP_sha512(), &chSalt[0],
                           (unsigned char *)&strKeyData[0], strKeyData.size(), nRounds, chKey, chIV);
+    }
+
+    if (nDerivationMethod == 1)
+    {
+        // Passphrase conversion
+        uint256 scryptHash = scrypt_salted_multiround_hash((const void*)strKeyData.c_str(), strKeyData.size(), &chSalt[0], 8, nRounds);
+
+        i = EVP_BytesToKey(EVP_aes_256_cbc(), EVP_sha512(), &chSalt[0],
+                          (unsigned char *)&scryptHash, sizeof scryptHash, nRounds, chKey, chIV);
+        OPENSSL_cleanse(&scryptHash, sizeof scryptHash);
+    }
+
 
     if (i != (int)WALLET_CRYPTO_KEY_SIZE)
     {
@@ -110,6 +132,15 @@ bool EncryptSecret(const CKeyingMaterial& vMasterKey, const CKeyingMaterial &vch
     return cKeyCrypter.Encrypt(*((const CKeyingMaterial*)&vchPlaintext), vchCiphertext);
 }
 
+bool DecryptSecret(const CKeyingMaterial& vMasterKey, const std::vector<unsigned char>& vchCiphertext, const uint256& nIV, CKeyingMaterial& vchPlaintext)
+{
+    CCrypter cKeyCrypter;
+    std::vector<unsigned char> chIV(WALLET_CRYPTO_KEY_SIZE);
+    memcpy(&chIV[0], &nIV, WALLET_CRYPTO_KEY_SIZE);
+    if(!cKeyCrypter.SetKey(vMasterKey, chIV))
+        return false;
+    return cKeyCrypter.Decrypt(vchCiphertext, *((CKeyingMaterial*)&vchPlaintext));
+}
 
 // General secure AES 256 CBC encryption routine
 bool EncryptAES256(const SecureString& sKey, const SecureString& sPlaintext, const std::string& sIV, std::string& sCiphertext)
@@ -146,17 +177,6 @@ bool EncryptAES256(const SecureString& sKey, const SecureString& sPlaintext, con
     return true;
 }
 
-
-bool DecryptSecret(const CKeyingMaterial& vMasterKey, const std::vector<unsigned char>& vchCiphertext, const uint256& nIV, CKeyingMaterial& vchPlaintext)
-{
-    CCrypter cKeyCrypter;
-    std::vector<unsigned char> chIV(WALLET_CRYPTO_KEY_SIZE);
-    memcpy(&chIV[0], &nIV, WALLET_CRYPTO_KEY_SIZE);
-    if(!cKeyCrypter.SetKey(vMasterKey, chIV))
-        return false;
-    return cKeyCrypter.Decrypt(vchCiphertext, *((CKeyingMaterial*)&vchPlaintext));
-}
-
 bool DecryptAES256(const SecureString& sKey, const std::string& sCiphertext, const std::string& sIV, SecureString& sPlaintext)
 {
     // plaintext will always be equal to or lesser than length of ciphertext
@@ -188,6 +208,7 @@ bool DecryptAES256(const SecureString& sKey, const std::string& sCiphertext, con
 }
 
 
+
 bool CCryptoKeyStore::SetCrypted()
 {
     LOCK(cs_KeyStore);
@@ -199,7 +220,7 @@ bool CCryptoKeyStore::SetCrypted()
     return true;
 }
 
-bool CCryptoKeyStore::Lock()
+bool CCryptoKeyStore::LockKeyStore()
 {
     if (!SetCrypted())
         return false;
@@ -340,3 +361,82 @@ bool CCryptoKeyStore::EncryptKeys(CKeyingMaterial& vMasterKeyIn)
     }
     return true;
 }
+
+
+
+bool SecMsgCrypter::SetKey(const std::vector<unsigned char>& vchNewKey, unsigned char* chNewIV)
+{
+    
+    if (vchNewKey.size() < sizeof(chKey))
+        return false;
+    
+    return SetKey(&vchNewKey[0], chNewIV);
+};
+
+bool SecMsgCrypter::SetKey(const unsigned char* chNewKey, unsigned char* chNewIV)
+{
+    // -- for EVP_aes_256_cbc() key must be 256 bit, iv must be 128 bit.
+    memcpy(&chKey[0], chNewKey, sizeof(chKey));
+    memcpy(chIV, chNewIV, sizeof(chIV));
+    
+    fKeySet = true;
+    return true;
+};
+
+bool SecMsgCrypter::Encrypt(unsigned char* chPlaintext, uint32_t nPlain, std::vector<unsigned char> &vchCiphertext)
+{
+    if (!fKeySet)
+        return false;
+    
+    // -- max ciphertext len for a n bytes of plaintext is n + AES_BLOCK_SIZE - 1 bytes
+    int nLen = nPlain;
+    
+    int nCLen = nLen + AES_BLOCK_SIZE, nFLen = 0;
+    vchCiphertext = std::vector<unsigned char> (nCLen);
+
+    EVP_CIPHER_CTX ctx;
+
+    bool fOk = true;
+
+    EVP_CIPHER_CTX_init(&ctx);
+    if (fOk) fOk = EVP_EncryptInit_ex(&ctx, EVP_aes_256_cbc(), NULL, &chKey[0], &chIV[0]);
+    if (fOk) fOk = EVP_EncryptUpdate(&ctx, &vchCiphertext[0], &nCLen, chPlaintext, nLen);
+    if (fOk) fOk = EVP_EncryptFinal_ex(&ctx, (&vchCiphertext[0])+nCLen, &nFLen);
+    EVP_CIPHER_CTX_cleanup(&ctx);
+
+    if (!fOk)
+        return false;
+
+    vchCiphertext.resize(nCLen + nFLen);
+    
+    return true;
+};
+
+bool SecMsgCrypter::Decrypt(unsigned char* chCiphertext, uint32_t nCipher, std::vector<unsigned char>& vchPlaintext)
+{
+    if (!fKeySet)
+        return false;
+    
+    // plaintext will always be equal to or lesser than length of ciphertext
+    int nPLen = nCipher, nFLen = 0;
+    
+    vchPlaintext.resize(nCipher);
+
+    EVP_CIPHER_CTX ctx;
+
+    bool fOk = true;
+
+    EVP_CIPHER_CTX_init(&ctx);
+    if (fOk) fOk = EVP_DecryptInit_ex(&ctx, EVP_aes_256_cbc(), NULL, &chKey[0], &chIV[0]);
+    if (fOk) fOk = EVP_DecryptUpdate(&ctx, &vchPlaintext[0], &nPLen, &chCiphertext[0], nCipher);
+    if (fOk) fOk = EVP_DecryptFinal_ex(&ctx, (&vchPlaintext[0])+nPLen, &nFLen);
+    EVP_CIPHER_CTX_cleanup(&ctx);
+
+    if (!fOk)
+        return false;
+    
+    vchPlaintext.resize(nPLen + nFLen);
+    
+    return true;
+};
+

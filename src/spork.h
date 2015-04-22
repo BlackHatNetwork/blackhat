@@ -1,5 +1,5 @@
-
-// Copyright (c) 2009-2012 The Dash developers
+// Copyright (c) 2015 The BLACKHAT developers
+// Copyright (c) 2009-2012 The Darkcoin developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 #ifndef SPORK_H
@@ -9,7 +9,7 @@
 #include "sync.h"
 #include "net.h"
 #include "key.h"
-#include "core.h"
+
 #include "util.h"
 #include "script.h"
 #include "base58.h"
@@ -20,18 +20,15 @@ using namespace boost;
 
 // Don't ever reuse these IDs for other sporks
 #define SPORK_1_MASTERNODE_PAYMENTS_ENFORCEMENT               10000
-#define SPORK_2_INSTANTX                                      10001
-#define SPORK_3_INSTANTX_BLOCK_FILTERING                      10002
-#define SPORK_4_NOTUSED                                       10003
-#define SPORK_5_MAX_VALUE                                     10004
-#define SPORK_6_NOTUSED                                       10005
-#define SPORK_7_MASTERNODE_SCANNING                           10006
+#define SPORK_2_MAX_VALUE                                     10002
+#define SPORK_3_REPLAY_BLOCKS                                 10003
+#define SPORK_4_NOTUSED                                       10004
 
-#define SPORK_1_MASTERNODE_PAYMENTS_ENFORCEMENT_DEFAULT       1424217600  //2015-2-18
-#define SPORK_2_INSTANTX_DEFAULT                              978307200   //2001-1-1
-#define SPORK_3_INSTANTX_BLOCK_FILTERING_DEFAULT              1424217600  //2015-2-18
-#define SPORK_5_MAX_VALUE_DEFAULT                             1000        //1000 DASH
-#define SPORK_7_MASTERNODE_SCANNING_DEFAULT                   978307200   //2001-1-1
+
+#define SPORK_1_MASTERNODE_PAYMENTS_ENFORCEMENT_DEFAULT       2428537599  //2015-4-8 23:59:59 GMT
+#define SPORK_2_MAX_VALUE_DEFAULT                             500        //500 BLACKHAT 
+#define SPORK_3_REPLAY_BLOCKS_DEFAULT                         0
+#define SPORK_4_RECONVERGE_DEFAULT                            1420070400  //2047-1-1
 
 class CSporkMessage;
 class CSporkManager;
@@ -70,16 +67,20 @@ public:
     int64_t nTimeSigned;
 
     uint256 GetHash(){
-        uint256 n = HashX11(BEGIN(nSporkID), END(nTimeSigned));
+        uint256 n = Hash(BEGIN(nSporkID), END(nTimeSigned));
         return n;
     }
 
-    IMPLEMENT_SERIALIZE(
+    ADD_SERIALIZE_METHODS;
+
+    template <typename Stream, typename Operation>
+    inline void SerializationOp(Stream& s, Operation ser_action, int nType, int nVersion) {
+	unsigned int nSerSize = 0;
         READWRITE(nSporkID);
         READWRITE(nValue);
         READWRITE(nTimeSigned);
         READWRITE(vchSig);
-    )
+	}
 };
 
 
@@ -95,8 +96,8 @@ private:
 public:
 
     CSporkManager() {
-        strMainPubKey = "04549ac134f694c0243f503e8c8a9a986f5de6610049c40b07816809b0d1d06a21b07be27b9bb555931773f62ba6cf35a25fd52f694d4e1106ccd237a7bb899fdd";
-        strTestPubKey = "046f78dcf911fbd61910136f7f0f8d90578f68d0b3ac973b5040fb7afb501b5939f39b108b0569dca71488f5bbf498d92e4d1194f6f941307ffd95f75e76869f0e";
+        strMainPubKey = "04a983220ea7a38a7106385003fef77896538a382a0dcc389cc45f3c98751d9af423a097789757556259351198a8aaa628a1fd644c3232678c5845384c744ff8d7";
+        strTestPubKey = "04a983220ea7a38a7106385003fef77896538a382a0dcc389cc45f3c98751d9af423a097789757556259351198a8aaa628a1fd644c3232678c5845384c744ff8d7";
     }
 
     std::string GetSporkNameByID(int id);

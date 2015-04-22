@@ -1,42 +1,62 @@
-// Copyright (c) 2009-2014 The Bitcoin developers
-// Copyright (c) 2014-2015 The Dash developers
+// Copyright (c) 2009-2012 Bitcoin Developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include "base58.h"
-#include "rpcserver.h"
-#include "init.h"
-#include "main.h"
-#include "sync.h"
-#include "wallet.h"
-
+#include <iostream>
 #include <fstream>
-#include <stdint.h>
 
-#include <boost/algorithm/string.hpp>
+#include "init.h" // for pwalletMain
+#include "rpcserver.h"
+#include "ui_interface.h"
+#include "base58.h"
+
 #include <boost/date_time/posix_time/posix_time.hpp>
-#include "json/json_spirit_value.h"
+#include <boost/variant/get.hpp>
+#include <boost/algorithm/string.hpp>
 
 using namespace json_spirit;
 using namespace std;
 
 void EnsureWalletIsUnlocked();
 
-std::string static EncodeDumpTime(int64_t nTime) {
-    return DateTimeStrFormat("%Y-%m-%dT%H:%M:%SZ", nTime);
+namespace bt = boost::posix_time;
+
+// Extended DecodeDumpTime implementation, see this page for details:
+// http://stackoverflow.com/questions/3786201/parsing-of-date-time-from-string-boost
+const std::locale formats[] = {
+    std::locale(std::locale::classic(),new bt::time_input_facet("%Y-%m-%dT%H:%M:%SZ")),
+    std::locale(std::locale::classic(),new bt::time_input_facet("%Y-%m-%d %H:%M:%S")),
+    std::locale(std::locale::classic(),new bt::time_input_facet("%Y/%m/%d %H:%M:%S")),
+    std::locale(std::locale::classic(),new bt::time_input_facet("%d.%m.%Y %H:%M:%S")),
+    std::locale(std::locale::classic(),new bt::time_input_facet("%Y-%m-%d"))
+};
+
+const size_t formats_n = sizeof(formats)/sizeof(formats[0]);
+
+std::time_t pt_to_time_t(const bt::ptime& pt)
+{
+    bt::ptime timet_start(boost::gregorian::date(1970,1,1));
+    bt::time_duration diff = pt - timet_start;
+    return diff.ticks()/bt::time_duration::rep_type::ticks_per_second;
 }
 
-int64_t static DecodeDumpTime(const std::string &str) {
-    static const boost::posix_time::ptime epoch = boost::posix_time::from_time_t(0);
-    static const std::locale loc(std::locale::classic(),
-        new boost::posix_time::time_input_facet("%Y-%m-%dT%H:%M:%SZ"));
-    std::istringstream iss(str);
-    iss.imbue(loc);
-    boost::posix_time::ptime ptime(boost::date_time::not_a_date_time);
-    iss >> ptime;
-    if (ptime.is_not_a_date_time())
-        return 0;
-    return (ptime - epoch).total_seconds();
+int64_t DecodeDumpTime(const std::string& s)
+{
+    bt::ptime pt;
+
+    for(size_t i=0; i<formats_n; ++i)
+    {
+        std::istringstream is(s);
+        is.imbue(formats[i]);
+        is >> pt;
+        if(pt != bt::ptime()) break;
+    }
+
+    return pt_to_time_t(pt);
+}
+
+std::string static EncodeDumpTime(int64_t nTime) {
+    return DateTimeStrFormat("%Y-%m-%dT%H:%M:%SZ", nTime);
 }
 
 std::string static EncodeDumpString(const std::string &str) {
@@ -56,7 +76,7 @@ std::string DecodeDumpString(const std::string &str) {
     for (unsigned int pos = 0; pos < str.length(); pos++) {
         unsigned char c = str[pos];
         if (c == '%' && pos+2 < str.length()) {
-            c = (((str[pos+1]>>6)*9+((str[pos+1]-'0')&15)) << 4) |
+            c = (((str[pos+1]>>6)*9+((str[pos+1]-'0')&15)) << 4) | 
                 ((str[pos+2]>>6)*9+((str[pos+2]-'0')&15));
             pos += 2;
         }
@@ -65,28 +85,30 @@ std::string DecodeDumpString(const std::string &str) {
     return ret.str();
 }
 
+class CTxDump
+{
+public:
+    CBlockIndex *pindex;
+    int64_t nValue;
+    bool fSpent;
+    CWalletTx* ptx;
+    int nOut;
+    CTxDump(CWalletTx* ptx = NULL, int nOut = -1)
+    {
+        pindex = NULL;
+        nValue = 0;
+        fSpent = false;
+        this->ptx = ptx;
+        this->nOut = nOut;
+    }
+};
+
 Value importprivkey(const Array& params, bool fHelp)
 {
     if (fHelp || params.size() < 1 || params.size() > 3)
         throw runtime_error(
-            "importprivkey \"dashprivkey\" ( \"label\" rescan )\n"
-            "\nAdds a private key (as returned by dumpprivkey) to your wallet.\n"
-            "\nArguments:\n"
-            "1. \"dashprivkey\"   (string, required) The private key (see dumpprivkey)\n"
-            "2. \"label\"            (string, optional) an optional label\n"
-            "3. rescan               (boolean, optional, default=true) Rescan the wallet for transactions\n"
-            "\nExamples:\n"
-            "\nDump a private key\n"
-            + HelpExampleCli("dumpprivkey", "\"myaddress\"") +
-            "\nImport the private key\n"
-            + HelpExampleCli("importprivkey", "\"mykey\"") +
-            "\nImport using a label\n"
-            + HelpExampleCli("importprivkey", "\"mykey\" \"testing\" false") +
-            "\nAs a json rpc call\n"
-            + HelpExampleRpc("importprivkey", "\"mykey\", \"testing\", false")
-        );
-
-    EnsureWalletIsUnlocked();
+            "importprivkey <blackhatprivkey> [label] [rescan=true]\n"
+            "Adds a private key (as returned by dumpprivkey) to your wallet.");
 
     string strSecret = params[0].get_str();
     string strLabel = "";
@@ -101,18 +123,18 @@ Value importprivkey(const Array& params, bool fHelp)
     CBitcoinSecret vchSecret;
     bool fGood = vchSecret.SetString(strSecret);
 
-    if (!fGood) throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid private key encoding");
+    if (!fGood) throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid private key");
+    if (fWalletUnlockStakingOnly)
+        throw JSONRPCError(RPC_WALLET_UNLOCK_NEEDED, "Wallet is unlocked for staking only.");
 
     CKey key = vchSecret.GetKey();
-    if (!key.IsValid()) throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Private key outside allowed range");
-
     CPubKey pubkey = key.GetPubKey();
     CKeyID vchAddress = pubkey.GetID();
     {
         LOCK2(cs_main, pwalletMain->cs_wallet);
 
         pwalletMain->MarkDirty();
-        pwalletMain->SetAddressBook(vchAddress, strLabel, "receive");
+        pwalletMain->SetAddressBookName(vchAddress, strLabel);
 
         // Don't throw error in case a key is already there
         if (pwalletMain->HaveKey(vchAddress))
@@ -127,7 +149,8 @@ Value importprivkey(const Array& params, bool fHelp)
         pwalletMain->nTimeFirstKey = 1; // 0 would be considered 'no value'
 
         if (fRescan) {
-            pwalletMain->ScanForWalletTransactions(chainActive.Genesis(), true);
+            pwalletMain->ScanForWalletTransactions(pindexGenesisBlock, true);
+            pwalletMain->ReacceptWalletTransactions();
         }
     }
 
@@ -138,36 +161,21 @@ Value importwallet(const Array& params, bool fHelp)
 {
     if (fHelp || params.size() != 1)
         throw runtime_error(
-            "importwallet \"filename\"\n"
-            "\nImports keys from a wallet dump file (see dumpwallet).\n"
-            "\nArguments:\n"
-            "1. \"filename\"    (string, required) The wallet file\n"
-            "\nExamples:\n"
-            "\nDump the wallet\n"
-            + HelpExampleCli("dumpwallet", "\"test\"") +
-            "\nImport the wallet\n"
-            + HelpExampleCli("importwallet", "\"test\"") +
-            "\nImport using the json rpc call\n"
-            + HelpExampleRpc("importwallet", "\"test\"")
-        );
+            "importwallet <filename>\n"
+            "Imports keys from a wallet dump file (see dumpwallet).");
 
     EnsureWalletIsUnlocked();
 
     ifstream file;
-    file.open(params[0].get_str().c_str(), std::ios::in | std::ios::ate);
+    file.open(params[0].get_str().c_str());
     if (!file.is_open())
         throw JSONRPCError(RPC_INVALID_PARAMETER, "Cannot open wallet dump file");
 
-    int64_t nTimeBegin = chainActive.Tip()->nTime;
+    int64_t nTimeBegin = pindexBest->nTime;
 
     bool fGood = true;
 
-    int64_t nFilesize = std::max((int64_t)1, (int64_t)file.tellg());
-    file.seekg(0, file.beg);
-
-    pwalletMain->ShowProgress(_("Importing..."), 0); // show progress dialog in GUI
     while (file.good()) {
-        pwalletMain->ShowProgress("", std::max(1, std::min(99, (int)(((double)file.tellg() / (double)nFilesize) * 100))));
         std::string line;
         std::getline(file, line);
         if (line.empty() || line[0] == '#')
@@ -203,27 +211,27 @@ Value importwallet(const Array& params, bool fHelp)
             }
         }
         LogPrintf("Importing %s...\n", CBitcoinAddress(keyid).ToString());
-        if (!pwalletMain->AddKeyPubKey(key, pubkey)) {
+        if (!pwalletMain->AddKey(key)) {
             fGood = false;
             continue;
         }
         pwalletMain->mapKeyMetadata[keyid].nCreateTime = nTime;
         if (fLabel)
-            pwalletMain->SetAddressBook(keyid, strLabel, "receive");
+            pwalletMain->SetAddressBookName(keyid, strLabel);
         nTimeBegin = std::min(nTimeBegin, nTime);
     }
     file.close();
-    pwalletMain->ShowProgress("", 100); // hide progress dialog in GUI
 
-    CBlockIndex *pindex = chainActive.Tip();
+    CBlockIndex *pindex = pindexBest;
     while (pindex && pindex->pprev && pindex->nTime > nTimeBegin - 7200)
         pindex = pindex->pprev;
 
     if (!pwalletMain->nTimeFirstKey || nTimeBegin < pwalletMain->nTimeFirstKey)
         pwalletMain->nTimeFirstKey = nTimeBegin;
 
-    LogPrintf("Rescanning last %i blocks\n", chainActive.Height() - pindex->nHeight + 1);
+    LogPrintf("Rescanning last %i blocks\n", pindexBest->nHeight - pindex->nHeight + 1);
     pwalletMain->ScanForWalletTransactions(pindex);
+    pwalletMain->ReacceptWalletTransactions();
     pwalletMain->MarkDirty();
 
     if (!fGood)
@@ -232,29 +240,22 @@ Value importwallet(const Array& params, bool fHelp)
     return Value::null;
 }
 
+
 Value dumpprivkey(const Array& params, bool fHelp)
 {
     if (fHelp || params.size() != 1)
         throw runtime_error(
-            "dumpprivkey \"dashaddress\"\n"
-            "\nReveals the private key corresponding to 'dashaddress'.\n"
-            "Then the importprivkey can be used with this output\n"
-            "\nArguments:\n"
-            "1. \"dashaddress\"   (string, required) The dash address for the private key\n"
-            "\nResult:\n"
-            "\"key\"                (string) The private key\n"
-            "\nExamples:\n"
-            + HelpExampleCli("dumpprivkey", "\"myaddress\"")
-            + HelpExampleCli("importprivkey", "\"mykey\"")
-            + HelpExampleRpc("dumpprivkey", "\"myaddress\"")
-        );
+            "dumpprivkey <blackhataddress>\n"
+            "Reveals the private key corresponding to <blackhataddress>.");
 
     EnsureWalletIsUnlocked();
 
     string strAddress = params[0].get_str();
     CBitcoinAddress address;
     if (!address.SetString(strAddress))
-        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid Dash address");
+        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid BlackHat address");
+    if (fWalletUnlockStakingOnly)
+        throw JSONRPCError(RPC_WALLET_UNLOCK_NEEDED, "Wallet is unlocked for staking only.");
     CKeyID keyID;
     if (!address.GetKeyID(keyID))
         throw JSONRPCError(RPC_TYPE_ERROR, "Address does not refer to a key");
@@ -264,19 +265,12 @@ Value dumpprivkey(const Array& params, bool fHelp)
     return CBitcoinSecret(vchSecret).ToString();
 }
 
-
 Value dumpwallet(const Array& params, bool fHelp)
 {
     if (fHelp || params.size() != 1)
         throw runtime_error(
-            "dumpwallet \"filename\"\n"
-            "\nDumps all wallet keys in a human-readable format.\n"
-            "\nArguments:\n"
-            "1. \"filename\"    (string, required) The filename\n"
-            "\nExamples:\n"
-            + HelpExampleCli("dumpwallet", "\"test\"")
-            + HelpExampleRpc("dumpwallet", "\"test\"")
-        );
+            "dumpwallet <filename>\n"
+            "Dumps all wallet keys in a human-readable format.");
 
     EnsureWalletIsUnlocked();
 
@@ -286,8 +280,11 @@ Value dumpwallet(const Array& params, bool fHelp)
         throw JSONRPCError(RPC_INVALID_PARAMETER, "Cannot open wallet dump file");
 
     std::map<CKeyID, int64_t> mapKeyBirth;
+
     std::set<CKeyID> setKeyPool;
+
     pwalletMain->GetKeyBirthTimes(mapKeyBirth);
+
     pwalletMain->GetAllReserveKeys(setKeyPool);
 
     // sort time/key pairs
@@ -299,19 +296,20 @@ Value dumpwallet(const Array& params, bool fHelp)
     std::sort(vKeyBirth.begin(), vKeyBirth.end());
 
     // produce output
-    file << strprintf("# Wallet dump created by Dash %s (%s)\n", CLIENT_BUILD, CLIENT_DATE);
+    file << strprintf("# Wallet dump created by BlackHat %s (%s)\n", CLIENT_BUILD, CLIENT_DATE);
     file << strprintf("# * Created on %s\n", EncodeDumpTime(GetTime()));
-    file << strprintf("# * Best block at time of backup was %i (%s),\n", chainActive.Height(), chainActive.Tip()->GetBlockHash().ToString());
-    file << strprintf("#   mined on %s\n", EncodeDumpTime(chainActive.Tip()->nTime));
+    file << strprintf("# * Best block at time of backup was %i (%s),\n", nBestHeight, hashBestChain.ToString());
+    file << strprintf("#   mined on %s\n", EncodeDumpTime(pindexBest->nTime));
     file << "\n";
     for (std::vector<std::pair<int64_t, CKeyID> >::const_iterator it = vKeyBirth.begin(); it != vKeyBirth.end(); it++) {
         const CKeyID &keyid = it->second;
         std::string strTime = EncodeDumpTime(it->first);
         std::string strAddr = CBitcoinAddress(keyid).ToString();
+
         CKey key;
         if (pwalletMain->GetKey(keyid, key)) {
             if (pwalletMain->mapAddressBook.count(keyid)) {
-                file << strprintf("%s %s label=%s # addr=%s\n", CBitcoinSecret(key).ToString(), strTime, EncodeDumpString(pwalletMain->mapAddressBook[keyid].name), strAddr);
+                file << strprintf("%s %s label=%s # addr=%s\n", CBitcoinSecret(key).ToString(), strTime, EncodeDumpString(pwalletMain->mapAddressBook[keyid]), strAddr);
             } else if (setKeyPool.count(keyid)) {
                 file << strprintf("%s %s reserve=1 # addr=%s\n", CBitcoinSecret(key).ToString(), strTime, strAddr);
             } else {

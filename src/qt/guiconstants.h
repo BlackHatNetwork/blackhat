@@ -1,8 +1,3 @@
-// Copyright (c) 2011-2014 The Bitcoin developers
-// Copyright (c) 2014-2015 The Dash developers
-// Distributed under the MIT/X11 software license, see the accompanying
-// file COPYING or http://www.opensource.org/licenses/mit-license.php.
-
 #ifndef GUICONSTANTS_H
 #define GUICONSTANTS_H
 
@@ -12,7 +7,7 @@ static const int MODEL_UPDATE_DELAY = 250;
 /* AskPassphraseDialog -- Maximum passphrase length */
 static const int MAX_PASSPHRASE_SIZE = 1024;
 
-/* DarkcoinGUI -- Size of icons in status bar */
+/* BitcoinGUI -- Size of icons in status bar */
 static const int STATUSBAR_ICONSIZE = 16;
 
 /* Invalid field background style */
@@ -33,18 +28,7 @@ static const int TOOLTIP_WRAP_THRESHOLD = 80;
 /* Maximum allowed URI length */
 static const int MAX_URI_LENGTH = 255;
 
-/* Maximum somewhat-sane size of a payment request file */
-static const int MAX_PAYMENT_REQUEST_SIZE = 50000; // bytes
-
 /* QRCodeDialog -- size of exported QR Code image */
 #define EXPORT_IMAGE_SIZE 256
-
-/* Number of frames in spinner animation */
-#define SPINNER_FRAMES 35
-
-#define QAPP_ORG_NAME "Dash"
-#define QAPP_ORG_DOMAIN "dashpay.io"
-#define QAPP_APP_NAME_DEFAULT "Dash-Qt"
-#define QAPP_APP_NAME_TESTNET "Dash-Qt-testnet"
 
 #endif // GUICONSTANTS_H

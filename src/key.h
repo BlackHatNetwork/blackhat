@@ -2,17 +2,15 @@
 // Copyright (c) 2009-2013 The Bitcoin developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
-
 #ifndef BITCOIN_KEY_H
 #define BITCOIN_KEY_H
 
+#include <vector>
+
 #include "allocators.h"
-#include "hash.h"
 #include "serialize.h"
 #include "uint256.h"
-
-#include <stdexcept>
-#include <vector>
+#include "hash.h"
 
 // secp256k1:
 // const unsigned int PRIVATE_KEY_SIZE = 279;
@@ -168,12 +166,21 @@ public:
 
     // Derive BIP32 child pubkey.
     bool Derive(CPubKey& pubkeyChild, unsigned char ccChild[32], unsigned int nChild, const unsigned char cc[32]) const;
+
+    // Raw for stealth address
+    std::vector<unsigned char> Raw() const {
+	std::vector<unsigned char> r;
+        r.insert(r.end(), vch, vch+size());
+	return r;
+    }
 };
 
 
 // secure_allocator is defined in allocators.h
 // CPrivKey is a serialized private key, with all parameters included (279 bytes)
 typedef std::vector<unsigned char, secure_allocator<unsigned char> > CPrivKey;
+// CSecret is a serialization of just the secret parameter (32 bytes)
+typedef std::vector<unsigned char, secure_allocator<unsigned char> > CSecret;
 
 /** An encapsulated private key. */
 class CKey {
@@ -269,6 +276,12 @@ public:
 
     // Load private key and check that public key matches.
     bool Load(CPrivKey &privkey, CPubKey &vchPubKey, bool fSkipCheck);
+
+    // Check whether an element of a signature (r or s) is valid.
+    static bool CheckSignatureElement(const unsigned char *vch, int len, bool half);
+
+    // Ensure that signature is DER-encoded
+    static bool ReserealizeSignature(std::vector<unsigned char>& vchSig);
 };
 
 struct CExtPubKey {

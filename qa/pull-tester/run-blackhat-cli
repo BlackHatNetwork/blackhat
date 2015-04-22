@@ -1,0 +1,13 @@
+#!/bin/bash
+
+# This is a thin wrapper around blackhat-cli that strips the Windows-style EOLs
+# from the output if present. It is necessary when using blackhat-cli.exe on
+# Linux since shells will interpret the line-endings as part of the result.
+
+CURDIR=$(cd $(dirname "$0"); pwd)
+# Get BUILDDIR and REAL_SUPCOIND
+
+# Grab the value of $REAL_SUPCOINCLI which may be blackhat-cli.exe.
+. "${CURDIR}/tests-config.sh"
+
+"${REAL_SUPCOINCLI}" "$@" | sed 's/\r//'

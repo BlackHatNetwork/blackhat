@@ -1,18 +1,13 @@
-// Copyright (c) 2011-2013 The Bitcoin developers
-// Distributed under the MIT/X11 software license, see the accompanying
-// file COPYING or http://www.opensource.org/licenses/mit-license.php.
-
 #ifndef TRANSACTIONTABLEMODEL_H
 #define TRANSACTIONTABLEMODEL_H
 
 #include <QAbstractTableModel>
 #include <QStringList>
 
-class TransactionRecord;
-class TransactionTablePriv;
-class WalletModel;
-
 class CWallet;
+class TransactionTablePriv;
+class TransactionRecord;
+class WalletModel;
 
 /** UI model for the transaction table of a wallet.
  */
@@ -50,8 +45,6 @@ public:
         AmountRole,
         /** Unique identifier */
         TxIDRole,
-        /** Transaction hash */
-        TxHashRole,
         /** Is transaction confirmed? */
         ConfirmedRole,
         /** Formatted amount, without brackets when unconfirmed */
@@ -65,17 +58,12 @@ public:
     QVariant data(const QModelIndex &index, int role) const;
     QVariant headerData(int section, Qt::Orientation orientation, int role) const;
     QModelIndex index(int row, int column, const QModelIndex & parent = QModelIndex()) const;
-    bool processingQueuedTransactions() { return fProcessingQueuedTransactions; }
 
 private:
     CWallet* wallet;
     WalletModel *walletModel;
     QStringList columns;
     TransactionTablePriv *priv;
-    bool fProcessingQueuedTransactions;
-
-    void subscribeToCoreSignals();
-    void unsubscribeFromCoreSignals();
 
     QString lookupAddress(const std::string &address, bool tooltip) const;
     QVariant addressColor(const TransactionRecord *wtx) const;
@@ -89,12 +77,9 @@ private:
     QVariant txAddressDecoration(const TransactionRecord *wtx) const;
 
 public slots:
-    /* New transaction, or transaction changed status */
-    void updateTransaction(const QString &hash, int status, bool showTransaction);
+    void updateTransaction(const QString &hash, int status);
     void updateConfirmations();
     void updateDisplayUnit();
-    /* Needed to update fProcessingQueuedTransactions through a QueuedConnection */
-    void setProcessingQueuedTransactions(bool value) { fProcessingQueuedTransactions = value; }
 
     friend class TransactionTablePriv;
 };

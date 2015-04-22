@@ -1,0 +1,12 @@
+[Desktop Entry]
+Encoding=UTF-8
+Name=BlackHat
+Comment=BlackHat P2P Cryptocurrency
+Comment[fr]=BlackHat, monnaie virtuelle cryptographique pair à pair
+Comment[tr]=BlackHat, eşten eşe kriptografik sanal para birimi
+Exec=blackhat-qt %u
+Terminal=false
+Type=Application
+Icon=blackhat128
+MimeType=x-scheme-handler/blackhat;
+Categories=Office;Finance;

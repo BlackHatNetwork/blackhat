@@ -1,24 +1,41 @@
 *.tar.gz
 
 *.exe
-src/dash
-src/dashd
-src/dash-cli
-src/test/test_dash
-src/qt/test/test_dash-qt
+src/blackhat
+src/blackhatd
+src/blackhat-cli
+src/blackhat-tx
+src/test/test_blackhat
+src/qt/test/test_blackhat-qt
 
+# autoreconf
 Makefile.in
 aclocal.m4
 autom4te.cache/
+build-aux/config.guess
+build-aux/config.sub
+build-aux/depcomp
+build-aux/install-sh
+build-aux/ltmain.sh
+build-aux/m4/libtool.m4
+build-aux/m4/lt~obsolete.m4
+build-aux/m4/ltoptions.m4
+build-aux/m4/ltsugar.m4
+build-aux/m4/ltversion.m4
+build-aux/missing
+build-aux/compile
+build-aux/test-driver
 config.log
 config.status
 configure
-src/dash-config.h
-src/dash-config.h.in
-src/build-aux/
-src/stamp-h1
+libtool
+src/config/blackhat-config.h
+src/config/blackhat-config.h.in
+src/config/stamp-h1
 share/setup.nsi
 share/qt/Info.plist
+
+src/univalue/gen
 
 src/qt/*.moc
 src/qt/moc_*.cpp
@@ -28,15 +45,17 @@ src/qt/test/moc*.cpp
 
 .deps
 .dirstamp
+.libs
 .*.swp
 *.*~*
 *.bak
 *.rej
 *.orig
+*.pyc
 *.o
 *.o-*
 *.patch
-.dash
+.blackhat
 *.a
 *.pb.cc
 *.pb.h
@@ -48,26 +67,26 @@ src/qt/test/moc*.cpp
 *.json.h
 *.raw.h
 
+#libtool object files
+*.lo
+*.la
+
 # Compilation and Qt preprocessor part
 *.qm
 Makefile
-dash-qt
-Dash-Qt.app
+blackhat-qt
+BlackHat-Qt.app
 
 # Unit-tests
 Makefile.test
-dash-qt_test
+blackhat-qt_test
+src/test/buildenv.py
 
 # Resources cpp
 qrc_*.cpp
 
 # Qt creator
 *.pro.user
-darkcoi*.config
-*.creator
-*.creator.user
-darkcoi*.files
-darkcoi*.includes
 
 # Mac specific
 .DS_Store
@@ -76,7 +95,7 @@ build
 #lcov
 *.gcno
 /*.info
-test_dash.coverage/
+test_blackhat.coverage/
 total.coverage/
 coverage_percent.txt
 
@@ -84,10 +103,11 @@ coverage_percent.txt
 linux-coverage-build
 linux-build
 win32-build
-qa/pull-tester/run-bitcoind-for-test.sh
-qa/pull-tester/build-tests.sh
+qa/pull-tester/run-blackhatd-for-test.sh
+qa/pull-tester/tests-config.sh
+qa/pull-tester/cache/*
+qa/pull-tester/test.*/*
 
 !src/leveldb*/Makefile
 
-.cproject
-.project
+/doc/doxygen/

@@ -1,16 +1,5 @@
-Building Dash
+Building BlackHat
 
-Use the autogen script to prepare the build environment.
-
-    ./autogen.sh
-    ./configure
-    make
-
-Precompiled binaries are available at github, see
-https://github.com/dashproject/dash-binaries
-
-Always verify the signatures and checksums.
-
-See doc/build-*.md for instructions on building dashd,
+See doc/build-*.md for instructions on building blackhatd,
 the intended-for-services, no-graphical-interface, reference
-implementation of Dash.
+implementation of BlackHat.

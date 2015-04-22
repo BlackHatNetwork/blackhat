@@ -1,49 +1,78 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2014 The Bitcoin developers
-// Copyright (c) 2014-2015 The Dash developers
+// Copyright (c) 2009-2012 The Bitcoin developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #ifndef BITCOIN_UTIL_H
 #define BITCOIN_UTIL_H
 
-#if defined(HAVE_CONFIG_H)
-#include "dash-config.h"
+#ifndef WIN32
+#include <sys/types.h>
+#include <sys/time.h>
+#include <sys/resource.h>
 #endif
 
-#include "compat.h"
 #include "serialize.h"
 #include "tinyformat.h"
 
-#include <cstdio>
-#include <exception>
 #include <map>
-#include <stdarg.h>
-#include <stdint.h>
-#include <string>
+#include <list>
 #include <utility>
 #include <vector>
+#include <string>
 
-#ifndef WIN32
-#include <sys/resource.h>
-#include <sys/time.h>
-#include <sys/types.h>
-#endif
-
-#include <boost/filesystem/path.hpp>
 #include <boost/thread.hpp>
+#include <boost/filesystem.hpp>
+#include <boost/filesystem/path.hpp>
+#include <boost/date_time/gregorian/gregorian_types.hpp>
+#include <boost/date_time/posix_time/posix_time_types.hpp>
 
-class CNetAddr;
+#include <openssl/bio.h>
+#include <openssl/evp.h>
+#include <openssl/buffer.h>
+#include <openssl/crypto.h> // for OPENSSL_cleanse()
+#include <openssl/rand.h>
+#include <openssl/bn.h>
+
+#include <stdint.h>
+
 class uint256;
 
 static const int64_t COIN = 100000000;
 static const int64_t CENT = 1000000;
+
+typedef int64_t CAmount;
 
 #define BEGIN(a)            ((char*)&(a))
 #define END(a)              ((char*)&((&(a))[1]))
 #define UBEGIN(a)           ((unsigned char*)&(a))
 #define UEND(a)             ((unsigned char*)&((&(a))[1]))
 #define ARRAYLEN(array)     (sizeof(array)/sizeof((array)[0]))
+
+#define UVOIDBEGIN(a)        ((void*)&(a))
+#define CVOIDBEGIN(a)        ((const void*)&(a))
+#define UINTBEGIN(a)        ((uint32_t*)&(a))
+#define CUINTBEGIN(a)        ((const uint32_t*)&(a))
+
+/* Format characters for (s)size_t and ptrdiff_t */
+#if defined(_MSC_VER) || defined(__MSVCRT__)
+  /* (s)size_t and ptrdiff_t have the same size specifier in MSVC:
+     http://msdn.microsoft.com/en-us/library/tcxf1dw6%28v=vs.100%29.aspx
+   */
+  #define PRIszx    "Ix"
+  #define PRIszu    "Iu"
+  #define PRIszd    "Id"
+  #define PRIpdx    "Ix"
+  #define PRIpdu    "Iu"
+  #define PRIpdd    "Id"
+#else /* C99 standard */
+  #define PRIszx    "zx"
+  #define PRIszu    "zu"
+  #define PRIszd    "zd"
+  #define PRIpdx    "tx"
+  #define PRIpdu    "tu"
+  #define PRIpdd    "td"
+#endif
 
 // This is needed because the foreach macro can't get over the comma in pair<t1, t2>
 #define PAIRTYPE(t1, t2)    std::pair<t1, t2>
@@ -62,7 +91,10 @@ T* alignup(T* p)
     return u.ptr;
 }
 
+boost::filesystem::path GetMasternodeConfigFile();
+
 #ifdef WIN32
+#define MSG_NOSIGNAL        0
 #define MSG_DONTWAIT        0
 
 #ifndef S_IRUSR
@@ -72,48 +104,40 @@ T* alignup(T* p)
 #else
 #define MAX_PATH            1024
 #endif
-// As Solaris does not have the MSG_NOSIGNAL flag for send(2) syscall, it is defined as 0
-#if !defined(HAVE_MSG_NOSIGNAL) && !defined(MSG_NOSIGNAL)
-#define MSG_NOSIGNAL 0
-#endif
 
 inline void MilliSleep(int64_t n)
 {
-// Boost's sleep_for was uninterruptable when backed by nanosleep from 1.50
-// until fixed in 1.52. Use the deprecated sleep method for the broken case.
-// See: https://svn.boost.org/trac/boost/ticket/7238
-#if defined(HAVE_WORKING_BOOST_SLEEP_FOR)
+#if BOOST_VERSION >= 105000
     boost::this_thread::sleep_for(boost::chrono::milliseconds(n));
-#elif defined(HAVE_WORKING_BOOST_SLEEP)
-    boost::this_thread::sleep(boost::posix_time::milliseconds(n));
 #else
-//should never get here
-#error missing boost sleep implementation
+    boost::this_thread::sleep(boost::posix_time::milliseconds(n));
 #endif
 }
 
-//Dash only features
+//Dark features
 
 extern bool fMasterNode;
 extern bool fLiteMode;
 extern int nInstantXDepth;
 extern int nDarksendRounds;
-extern int nAnonymizeDarkcoinAmount;
+extern int nAnonymizeBlackHatAmount;
 extern int nLiquidityProvider;
 extern bool fEnableDarksend;
 extern int64_t enforceMasternodePaymentsTime;
 extern std::string strMasterNodeAddr;
-extern int nMasternodeMinProtocol;
 extern int keysLoaded;
 extern bool fSucessfullyLoaded;
 extern std::vector<int64_t> darkSendDenominations;
+
 
 extern std::map<std::string, std::string> mapArgs;
 extern std::map<std::string, std::vector<std::string> > mapMultiArgs;
 extern bool fDebug;
 extern bool fPrintToConsole;
 extern bool fPrintToDebugLog;
+extern bool fDaemon;
 extern bool fServer;
+extern bool fCommandLine;
 extern std::string strMiscWarning;
 extern bool fNoListen;
 extern bool fLogTimestamps;
@@ -121,14 +145,14 @@ extern volatile bool fReopenDebugLog;
 
 void RandAddSeed();
 void RandAddSeedPerfmon();
-void SetupEnvironment();
+
+
 
 /* Return true if log accepts specified category */
 bool LogAcceptCategory(const char* category);
 /* Send a string to the log output */
 int LogPrintStr(const std::string &str);
 
-#define strprintf tfm::format
 #define LogPrintf(...) LogPrint(NULL, __VA_ARGS__)
 
 /* When we switch to C++11, this can be switched to variadic templates instead
@@ -167,8 +191,9 @@ static inline bool error(const char* format)
 }
 
 
-void LogException(std::exception* pex, const char* pszThread);
+void PrintException(std::exception* pex, const char* pszThread);
 void PrintExceptionContinue(std::exception* pex, const char* pszThread);
+void ParseString(const std::string& str, char c, std::vector<std::string>& v);
 std::string FormatMoney(int64_t n, bool fPlus=false);
 bool ParseMoney(const std::string& str, int64_t& nRet);
 bool ParseMoney(const char* pszIn, int64_t& nRet);
@@ -178,9 +203,9 @@ std::vector<unsigned char> ParseHex(const std::string& str);
 bool IsHex(const std::string& str);
 std::vector<unsigned char> DecodeBase64(const char* p, bool* pfInvalid = NULL);
 std::string DecodeBase64(const std::string& str);
-SecureString DecodeBase64Secure(const SecureString& input);
 std::string EncodeBase64(const unsigned char* pch, size_t len);
 std::string EncodeBase64(const std::string& str);
+SecureString DecodeBase64Secure(const SecureString& input);
 SecureString EncodeBase64Secure(const SecureString& input);
 std::vector<unsigned char> DecodeBase32(const char* p, bool* pfInvalid = NULL);
 std::string DecodeBase32(const std::string& str);
@@ -190,15 +215,10 @@ void ParseParameters(int argc, const char*const argv[]);
 bool WildcardMatch(const char* psz, const char* mask);
 bool WildcardMatch(const std::string& str, const std::string& mask);
 void FileCommit(FILE *fileout);
-bool TruncateFile(FILE *file, unsigned int length);
-int RaiseFileDescriptorLimit(int nMinFD);
-void AllocateFileRange(FILE *file, unsigned int offset, unsigned int length);
 bool RenameOver(boost::filesystem::path src, boost::filesystem::path dest);
-bool TryCreateDirectory(const boost::filesystem::path& p);
 boost::filesystem::path GetDefaultDataDir();
 const boost::filesystem::path &GetDataDir(bool fNetSpecific = true);
 boost::filesystem::path GetConfigFile();
-boost::filesystem::path GetMasternodeConfigFile();
 boost::filesystem::path GetPidFile();
 #ifndef WIN32
 void CreatePidFile(const boost::filesystem::path &path, pid_t pid);
@@ -207,25 +227,33 @@ void ReadConfigFile(std::map<std::string, std::string>& mapSettingsRet, std::map
 #ifdef WIN32
 boost::filesystem::path GetSpecialFolderPath(int nFolder, bool fCreate = true);
 #endif
-boost::filesystem::path GetTempPath();
 void ShrinkDebugFile();
+void GetRandBytes(unsigned char* buf, int num);
 int GetRandInt(int nMax);
 uint64_t GetRand(uint64_t nMax);
 uint256 GetRandHash();
 int64_t GetTime();
 void SetMockTime(int64_t nMockTimeIn);
-int64_t GetAdjustedTime();
-int64_t GetTimeOffset();
 std::string FormatFullVersion();
 std::string FormatSubVersion(const std::string& name, int nClientVersion, const std::vector<std::string>& comments);
-void AddTimeData(const CNetAddr& ip, int64_t nTime);
 void runCommand(std::string strCommand);
 
 
 
 
+/**
+ * Convert string to signed 32-bit integer with strict parse error feedback.
+ * @returns true if the entire string could be parsed as valid integer,
+ *   false if not the entire string could be parsed or when overflow or underflow occurred.
+ */
+bool ParseInt32(const std::string& str, int32_t *out);
 
 
+/** 
+ * Format a paragraph of text to a fixed width, adding spaces for
+ * indentation to any added line.
+ */
+std::string FormatParagraph(const std::string in, size_t width=79, size_t indent=0);
 
 
 
@@ -277,6 +305,16 @@ inline int64_t abs64(int64_t n)
     return (n >= 0 ? n : -n);
 }
 
+inline std::string leftTrim(std::string src, char chr)
+{
+    std::string::size_type pos = src.find_first_not_of(chr, 0);
+
+    if(pos > 0)
+        src.erase(0, pos);
+
+    return src;
+}
+
 template<typename T>
 std::string HexStr(const T itbegin, const T itend, bool fSpaces=false)
 {
@@ -302,17 +340,6 @@ inline std::string HexStr(const T& vch, bool fSpaces=false)
     return HexStr(vch.begin(), vch.end(), fSpaces);
 }
 
-template<typename T>
-void PrintHex(const T pbegin, const T pend, const char* pszFormat="%s", bool fSpaces=true)
-{
-    LogPrintf(pszFormat, HexStr(pbegin, pend, fSpaces).c_str());
-}
-
-inline void PrintHex(const std::vector<unsigned char>& vch, const char* pszFormat="%s", bool fSpaces=true)
-{
-    LogPrintf(pszFormat, HexStr(vch, fSpaces).c_str());
-}
-
 inline int64_t GetPerformanceCounter()
 {
     int64_t nCounter = 0;
@@ -326,14 +353,12 @@ inline int64_t GetPerformanceCounter()
     return nCounter;
 }
 
-/// returns the current time as UTC milliseconds
 inline int64_t GetTimeMillis()
 {
     return (boost::posix_time::ptime(boost::posix_time::microsec_clock::universal_time()) -
             boost::posix_time::ptime(boost::gregorian::date(1970,1,1))).total_milliseconds();
 }
 
-/// returns the current time as UTC microseconds
 inline int64_t GetTimeMicros()
 {
     return (boost::posix_time::ptime(boost::posix_time::microsec_clock::universal_time()) -
@@ -341,6 +366,13 @@ inline int64_t GetTimeMicros()
 }
 
 std::string DateTimeStrFormat(const char* pszFormat, int64_t nTime);
+
+static const std::string strTimestampFormat = "%Y-%m-%d %H:%M:%S UTC";
+inline std::string DateTimeStrFormat(int64_t nTime)
+{
+    return DateTimeStrFormat(strTimestampFormat.c_str(), nTime);
+}
+
 
 template<typename T>
 void skipspaces(T& it)
@@ -414,9 +446,9 @@ extern uint32_t insecure_rand_Rz;
 extern uint32_t insecure_rand_Rw;
 static inline uint32_t insecure_rand(void)
 {
-    insecure_rand_Rz = 36969 * (insecure_rand_Rz & 65535) + (insecure_rand_Rz >> 16);
-    insecure_rand_Rw = 18000 * (insecure_rand_Rw & 65535) + (insecure_rand_Rw >> 16);
-    return (insecure_rand_Rw << 16) + insecure_rand_Rz;
+  insecure_rand_Rz=36969*(insecure_rand_Rz&65535)+(insecure_rand_Rz>>16);
+  insecure_rand_Rw=18000*(insecure_rand_Rw&65535)+(insecure_rand_Rw>>16);
+  return (insecure_rand_Rw<<16)+insecure_rand_Rz;
 }
 
 /**
@@ -503,14 +535,10 @@ inline void SetThreadPriority(int nPriority)
 }
 #else
 
-// PRIO_MAX is not defined on Solaris
-#ifndef PRIO_MAX
-#define PRIO_MAX 20
-#endif
 #define THREAD_PRIORITY_LOWEST          PRIO_MAX
 #define THREAD_PRIORITY_BELOW_NORMAL    2
 #define THREAD_PRIORITY_NORMAL          0
-#define THREAD_PRIORITY_ABOVE_NORMAL    (-2)
+#define THREAD_PRIORITY_ABOVE_NORMAL    0
 
 inline void SetThreadPriority(int nPriority)
 {
@@ -541,7 +569,7 @@ inline uint32_t ByteReverse(uint32_t value)
 //    threadGroup.create_thread(boost::bind(&LoopForever<boost::function<void()> >, "nothing", f, milliseconds));
 template <typename Callable> void LoopForever(const char* name,  Callable func, int64_t msecs)
 {
-    std::string s = strprintf("dash-%s", name);
+    std::string s = strprintf("blackhat-%s", name);
     RenameThread(s.c_str());
     LogPrintf("%s thread start\n", name);
     try
@@ -558,18 +586,16 @@ template <typename Callable> void LoopForever(const char* name,  Callable func, 
         throw;
     }
     catch (std::exception& e) {
-        PrintExceptionContinue(&e, name);
-        throw;
+        PrintException(&e, name);
     }
     catch (...) {
-        PrintExceptionContinue(NULL, name);
-        throw;
+        PrintException(NULL, name);
     }
 }
 // .. and a wrapper that just calls func once
 template <typename Callable> void TraceThread(const char* name,  Callable func)
 {
-    std::string s = strprintf("dash-%s", name);
+    std::string s = strprintf("blackhat-%s", name);
     RenameThread(s.c_str());
     try
     {
@@ -583,12 +609,10 @@ template <typename Callable> void TraceThread(const char* name,  Callable func)
         throw;
     }
     catch (std::exception& e) {
-        PrintExceptionContinue(&e, name);
-        throw;
+        PrintException(&e, name);
     }
     catch (...) {
-        PrintExceptionContinue(NULL, name);
-        throw;
+        PrintException(NULL, name);
     }
 }
 

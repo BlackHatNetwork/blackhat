@@ -1,5 +1,5 @@
 // Copyright (c) 2010 Satoshi Nakamoto
-// Copyright (c) 2009-2013 The Bitcoin developers
+// Copyright (c) 2009-2012 The Bitcoin developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -7,19 +7,12 @@
 #define _BITCOINALERT_H_ 1
 
 #include "serialize.h"
-#include "sync.h"
 
-#include <map>
 #include <set>
-#include <stdint.h>
 #include <string>
 
-class CAlert;
 class CNode;
 class uint256;
-
-extern std::map<uint256, CAlert> mapAlerts;
-extern CCriticalSection cs_mapAlerts;
 
 /** Alerts are for notifying old versions if they become too obsolete and
  * need to upgrade.  The message is displayed in the status bar.
@@ -60,15 +53,14 @@ public:
         READWRITE(setSubVer);
         READWRITE(nPriority);
 
-        READWRITE(LIMITED_STRING(strComment, 65536));
-        READWRITE(LIMITED_STRING(strStatusBar, 256));
-        READWRITE(LIMITED_STRING(strReserved, 256));
+        READWRITE(strComment);
+        READWRITE(strStatusBar);
+        READWRITE(strReserved);
     )
 
     void SetNull();
 
     std::string ToString() const;
-    void print() const;
 };
 
 /** An alert is a combination of a serialized CUnsignedAlert and a signature. */
@@ -99,7 +91,6 @@ public:
     bool RelayTo(CNode* pnode) const;
     bool CheckSignature() const;
     bool ProcessAlert(bool fThread = true);
-    static void Notify(const std::string& strMessage, bool fThread);
 
     /*
      * Get copy of (active) alert object by hash. Returns a null alert if it is not found.

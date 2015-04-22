@@ -1,0 +1,27 @@
+# /etc/conf.d/blackhatd: config file for /etc/init.d/blackhatd
+
+# Config file location
+#SUPCOIND_CONFIGFILE="/etc/blackhat/blackhat.conf"
+
+# What directory to write pidfile to?  (created and owned by $SUPCOIND_USER)
+#SUPCOIND_PIDDIR="/var/run/blackhatd"
+
+# What filename to give the pidfile
+#SUPCOIND_PIDFILE="${SUPCOIND_PIDDIR}/blackhatd.pid"
+
+# Where to write blackhatd data (be mindful that the blockchain is large)
+#SUPCOIND_DATADIR="/var/lib/blackhatd"
+
+# User and group to own blackhatd process
+#SUPCOIND_USER="blackhat"
+#SUPCOIND_GROUP="blackhat"
+
+# Path to blackhatd executable
+#SUPCOIND_BIN="/usr/bin/blackhatd"
+
+# Nice value to run blackhatd under
+#SUPCOIND_NICE=0
+
+# Additional options (avoid -conf and -datadir, use flags above)
+SUPCOIND_OPTS="-disablewallet"
+

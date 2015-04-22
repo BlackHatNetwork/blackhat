@@ -1,7 +1,3 @@
-// Copyright (c) 2011-2013 The Bitcoin developers
-// Distributed under the MIT/X11 software license, see the accompanying
-// file COPYING or http://www.opensource.org/licenses/mit-license.php.
-
 #ifndef ADDRESSTABLEMODEL_H
 #define ADDRESSTABLEMODEL_H
 
@@ -9,9 +5,8 @@
 #include <QStringList>
 
 class AddressTablePriv;
-class WalletModel;
-
 class CWallet;
+class WalletModel;
 
 /**
    Qt model of the address book in the core. This allows views to access and modify the address book.
@@ -24,9 +19,16 @@ public:
     explicit AddressTableModel(CWallet *wallet, WalletModel *parent = 0);
     ~AddressTableModel();
 
+    enum AddressType {
+        AT_Unknown = 0, /**< User specified label */
+        AT_Normal = 1,  /**< Bitcoin address */
+        AT_Stealth = 2  /**< Stealth address */
+    };
+
     enum ColumnIndex {
         Label = 0,   /**< User specified label */
-        Address = 1  /**< Bitcoin address */
+        Address = 1,  /**< Bitcoin address */
+	Type = 2 /**< Address type */
     };
 
     enum RoleIndex {
@@ -61,7 +63,7 @@ public:
     /* Add an address to the model.
        Returns the added address on success, and an empty string otherwise.
      */
-    QString addRow(const QString &type, const QString &label, const QString &address);
+    QString addRow(const QString &type, const QString &label, const QString &address, int addressType);
 
     /* Look up label for address in address book, if not found return empty string.
      */
@@ -84,10 +86,13 @@ private:
     /** Notify listeners that data changed. */
     void emitDataChanged(int index);
 
+signals:
+    void defaultAddressChanged(const QString &address);
+
 public slots:
     /* Update address list from core.
      */
-    void updateEntry(const QString &address, const QString &label, bool isMine, const QString &purpose, int status);
+    void updateEntry(const QString &address, const QString &label, bool isMine, int status);
 
     friend class AddressTablePriv;
 };

@@ -1,4 +1,4 @@
-// Copyright (c) 2014 The Dash developers
+// Copyright (c) 2014 The Darkcoin developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -8,14 +8,14 @@
 #define KEEPASS_CRYPTO_KEY_SIZE 32
 #define KEEPASS_CRYPTO_BLOCK_SIZE 16
 #define KEEPASS_KEEPASSHTTP_HOST "localhost"
-#define KEEPASS_KEEPASSHTTP_PORT 19455
+#define KEEPASS_KEEPASSHTTP_PORT 19855
 
 #include <string>
 #include <vector>
 #include <map>
 
 #include "json/json_spirit_value.h"
-#include "crypter.h"
+
 #include "allocators.h"
 
 class CKeePassIntegrator {

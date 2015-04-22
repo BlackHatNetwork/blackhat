@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2013 The Bitcoin developers
+// Copyright (c) 2009-2012 The Bitcoin developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 #ifndef BITCOIN_WALLETDB_H
@@ -7,16 +7,16 @@
 
 #include "db.h"
 #include "key.h"
+#include "stealth.h"
 
 #include <list>
-#include <stdint.h>
 #include <string>
 #include <utility>
 #include <vector>
 
 class CAccount;
 class CAccountingEntry;
-struct CBlockLocator;
+class CBlockLocator;
 class CKeyPool;
 class CMasterKey;
 class CScript;
@@ -67,11 +67,58 @@ public:
     }
 };
 
+class CStealthKeyMetadata
+{
+// -- used to get secret for keys created by stealth transaction with wallet locked
+public:
+    CStealthKeyMetadata() {};
+    
+    CStealthKeyMetadata(CPubKey pkEphem_, CPubKey pkScan_)
+    {
+        pkEphem = pkEphem_;
+        pkScan = pkScan_;
+    };
+    
+    CPubKey pkEphem;
+    CPubKey pkScan;
+
+    IMPLEMENT_SERIALIZE
+    (
+        READWRITE(pkEphem);
+        READWRITE(pkScan);
+    )
+
+};
+
+class CnodehatConfig
+{
+public:
+    int nVersion;
+    std::string sAlias;
+    std::string sAddress;
+    std::string sCollateralAddress;
+    std::string sMasternodePrivKey;
+
+    CnodehatConfig()
+    {
+	nVersion = 0;
+    }
+
+    IMPLEMENT_SERIALIZE(
+        READWRITE(nVersion);
+        READWRITE(sAlias);
+        READWRITE(sAddress);
+        READWRITE(sCollateralAddress);
+	READWRITE(sMasternodePrivKey);
+    )
+};
+
+
 /** Access to the wallet database (wallet.dat) */
 class CWalletDB : public CDB
 {
 public:
-    CWalletDB(std::string strFilename, const char* pszMode="r+") : CDB(strFilename.c_str(), pszMode)
+    CWalletDB(const std::string& strFilename, const char* pszMode = "r+") : CDB(strFilename, pszMode)
     {
     }
 private:
@@ -79,13 +126,20 @@ private:
     void operator=(const CWalletDB&);
 public:
     bool WriteName(const std::string& strAddress, const std::string& strName);
-    bool EraseName(const std::string& strAddress);
 
-    bool WritePurpose(const std::string& strAddress, const std::string& purpose);
-    bool ErasePurpose(const std::string& strAddress);
+    bool EraseName(const std::string& strAddress);
 
     bool WriteTx(uint256 hash, const CWalletTx& wtx);
     bool EraseTx(uint256 hash);
+
+    bool WriteStealthKeyMeta(const CKeyID& keyId, const CStealthKeyMetadata& sxKeyMeta);
+    bool EraseStealthKeyMeta(const CKeyID& keyId);
+    bool WriteStealthAddress(const CStealthAddress& sxAddr);    
+    bool ReadStealthAddress(CStealthAddress& sxAddr);
+
+    bool WritenodehatConfig(std::string sAlias, const CnodehatConfig& nodeConfig);
+    bool ReadnodehatConfig(std::string sAlias, CnodehatConfig& nodeConfig);
+    bool ErasenodehatConfig(std::string sAlias);
 
     bool WriteKey(const CPubKey& vchPubKey, const CPrivKey& vchPrivKey, const CKeyMetadata &keyMeta);
     bool WriteCryptedKey(const CPubKey& vchPubKey, const std::vector<unsigned char>& vchCryptedSecret, const CKeyMetadata &keyMeta);
@@ -108,11 +162,6 @@ public:
 
     bool ReadAccount(const std::string& strAccount, CAccount& account);
     bool WriteAccount(const std::string& strAccount, const CAccount& account);
-
-    /// Write destination data key,value tuple to database
-    bool WriteDestData(const std::string &address, const std::string &key, const std::string &value);
-    /// Erase destination data tuple from wallet database
-    bool EraseDestData(const std::string &address, const std::string &key);
 private:
     bool WriteAccountingEntry(const uint64_t nAccEntryNum, const CAccountingEntry& acentry);
 public:
@@ -122,8 +171,6 @@ public:
 
     DBErrors ReorderTransactions(CWallet*);
     DBErrors LoadWallet(CWallet* pwallet);
-    DBErrors FindWalletTx(CWallet* pwallet, std::vector<uint256>& vTxHash);
-    DBErrors ZapWalletTx(CWallet* pwallet);
     static bool Recover(CDBEnv& dbenv, std::string filename, bool fOnlyKeys);
     static bool Recover(CDBEnv& dbenv, std::string filename);
 };

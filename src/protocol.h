@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2013 The Bitcoin developers
+// Copyright (c) 2009-2012 The Bitcoin developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -11,12 +11,10 @@
 #define __INCLUDED_PROTOCOL_H__
 
 #include "chainparams.h"
-#include "netbase.h"
 #include "serialize.h"
-#include "uint256.h"
-
-#include <stdint.h>
+#include "netbase.h"
 #include <string>
+#include "uint256.h"
 
 /** Message header.
  * (4) message start.
@@ -88,7 +86,6 @@ class CAddress : public CService
              READWRITE(*pip);
             )
 
-        void print() const;
 
     // TODO: make private (improves encapsulation)
     public:
@@ -120,7 +117,6 @@ class CInv
         bool IsKnownType() const;
         const char* GetCommand() const;
         std::string ToString() const;
-        void print() const;
 
     // TODO: make private (improves encapsulation)
     public:
@@ -128,18 +124,6 @@ class CInv
         uint256 hash;
 };
 
-enum
-{
-    MSG_TX = 1,
-    MSG_BLOCK,
-    // Nodes may always request a MSG_FILTERED_BLOCK in a getdata, however,
-    // MSG_FILTERED_BLOCK should not appear in any invs except as a part of getdata.
-    MSG_FILTERED_BLOCK,
-    MSG_TXLOCK_REQUEST,
-    MSG_TXLOCK_VOTE,
-    MSG_SPORK,
-    MSG_MASTERNODE_WINNER,
-    MSG_MASTERNODE_SCANNING_ERROR
-};
+
 
 #endif // __INCLUDED_PROTOCOL_H__

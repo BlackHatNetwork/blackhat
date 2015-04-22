@@ -1,0 +1,6 @@
+usr/local/bin/blackhat-qt usr/bin
+share/pixmaps/blackhat32.xpm usr/share/pixmaps
+share/pixmaps/blackhat16.xpm usr/share/pixmaps
+share/pixmaps/blackhat128.png usr/share/pixmaps
+debian/blackhat-qt.desktop usr/share/applications
+debian/blackhat-qt.protocol usr/share/kde4/services/

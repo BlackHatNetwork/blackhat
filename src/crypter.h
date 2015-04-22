@@ -1,15 +1,13 @@
-// Copyright (c) 2009-2013 The Bitcoin developers
+// Copyright (c) 2009-2012 The Bitcoin Developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
-
 #ifndef __CRYPTER_H__
 #define __CRYPTER_H__
 
-#include "allocators.h"
+#include "allocators.h" /* for SecureString */
+#include "key.h"
 #include "serialize.h"
 #include "keystore.h"
-
-class uint256;
 
 const unsigned int WALLET_CRYPTO_KEY_SIZE = 32;
 const unsigned int WALLET_CRYPTO_SALT_SIZE = 8;
@@ -56,9 +54,29 @@ public:
         // 25000 rounds is just under 0.1 seconds on a 1.86 GHz Pentium M
         // ie slightly lower than the lowest hardware we need bother supporting
         nDeriveIterations = 25000;
-        nDerivationMethod = 0;
+        nDerivationMethod = 1;
         vchOtherDerivationParameters = std::vector<unsigned char>(0);
     }
+
+    CMasterKey(unsigned int nDerivationMethodIndex)
+    {
+        switch (nDerivationMethodIndex)
+        {
+            case 0: // sha512
+            default:
+                nDeriveIterations = 25000;
+                nDerivationMethod = 0;
+                vchOtherDerivationParameters = std::vector<unsigned char>(0);
+            break;
+
+            case 1: // scrypt+sha512
+                nDeriveIterations = 10000;
+                nDerivationMethod = 1;
+                vchOtherDerivationParameters = std::vector<unsigned char>(0);
+            break;
+        }
+    }
+
 };
 
 typedef std::vector<unsigned char, secure_allocator<unsigned char> > CKeyingMaterial;
@@ -91,16 +109,16 @@ public:
         // Try to keep the key data out of swap (and be a bit over-careful to keep the IV that we don't even use out of swap)
         // Note that this does nothing about suspend-to-disk (which will put all our key data on disk)
         // Note as well that at no point in this program is any attempt made to prevent stealing of keys by reading the memory of the running process.
-        LockedPageManager::Instance().LockRange(&chKey[0], sizeof chKey);
-        LockedPageManager::Instance().LockRange(&chIV[0], sizeof chIV);
+        LockedPageManager::instance.LockRange(&chKey[0], sizeof chKey);
+        LockedPageManager::instance.LockRange(&chIV[0], sizeof chIV);
     }
 
     ~CCrypter()
     {
         CleanKey();
 
-        LockedPageManager::Instance().UnlockRange(&chKey[0], sizeof chKey);
-        LockedPageManager::Instance().UnlockRange(&chIV[0], sizeof chIV);
+        LockedPageManager::instance.UnlockRange(&chKey[0], sizeof chKey);
+        LockedPageManager::instance.UnlockRange(&chIV[0], sizeof chIV);
     }
 };
 
@@ -110,22 +128,20 @@ bool DecryptSecret(const CKeyingMaterial& vMasterKey, const std::vector<unsigned
 bool EncryptAES256(const SecureString& sKey, const SecureString& sPlaintext, const std::string& sIV, std::string& sCiphertext);
 bool DecryptAES256(const SecureString& sKey, const std::string& sCiphertext, const std::string& sIV, SecureString& sPlaintext);
 
-
 /** Keystore which keeps the private keys encrypted.
  * It derives from the basic key store, which is used if no encryption is active.
  */
 class CCryptoKeyStore : public CBasicKeyStore
 {
 private:
-    CryptedKeyMap mapCryptedKeys;
-
-    CKeyingMaterial vMasterKey;
-
     // if fUseCrypto is true, mapKeys must be empty
     // if fUseCrypto is false, vMasterKey must be empty
     bool fUseCrypto;
 
 protected:
+    CryptedKeyMap mapCryptedKeys;
+    CKeyingMaterial vMasterKey;
+
     bool SetCrypted();
 
     // will encrypt previously unencrypted keys
@@ -155,7 +171,7 @@ public:
         return result;
     }
 
-    bool Lock();
+    bool LockKeyStore();
 
     virtual bool AddCryptedKey(const CPubKey &vchPubKey, const std::vector<unsigned char> &vchCryptedSecret);
     bool AddKeyPubKey(const CKey& key, const CPubKey &pubkey);
@@ -192,5 +208,41 @@ public:
      */
     boost::signals2::signal<void (CCryptoKeyStore* wallet)> NotifyStatusChanged;
 };
+
+class SecMsgCrypter
+{
+private:
+    unsigned char chKey[32];
+    unsigned char chIV[16];
+    bool fKeySet;
+public:
+    
+    SecMsgCrypter()
+    {
+        // Try to keep the key data out of swap (and be a bit over-careful to keep the IV that we don't even use out of swap)
+        // Note that this does nothing about suspend-to-disk (which will put all our key data on disk)
+        // Note as well that at no point in this program is any attempt made to prevent stealing of keys by reading the memory of the running process.
+        LockedPageManager::instance.LockRange(&chKey[0], sizeof chKey);
+        LockedPageManager::instance.LockRange(&chIV[0], sizeof chIV);
+        fKeySet = false;
+    }
+    
+    ~SecMsgCrypter()
+    {
+        // clean key
+        memset(&chKey, 0, sizeof chKey);
+        memset(&chIV, 0, sizeof chIV);
+        fKeySet = false;
+        
+        LockedPageManager::instance.UnlockRange(&chKey[0], sizeof chKey);
+        LockedPageManager::instance.UnlockRange(&chIV[0], sizeof chIV);
+    }
+    
+    bool SetKey(const std::vector<unsigned char>& vchNewKey, unsigned char* chNewIV);
+    bool SetKey(const unsigned char* chNewKey, unsigned char* chNewIV);
+    bool Encrypt(unsigned char* chPlaintext, uint32_t nPlain, std::vector<unsigned char> &vchCiphertext);
+    bool Decrypt(unsigned char* chCiphertext, uint32_t nCipher, std::vector<unsigned char>& vchPlaintext);
+};
+
 
 #endif

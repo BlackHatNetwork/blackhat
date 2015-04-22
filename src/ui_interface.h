@@ -6,15 +6,17 @@
 #ifndef BITCOIN_UI_INTERFACE_H
 #define BITCOIN_UI_INTERFACE_H
 
-#include <stdint.h>
-#include <string>
-
 #include <boost/signals2/last_value.hpp>
 #include <boost/signals2/signal.hpp>
+
+#include <string>
+
+#include <stdint.h>
 
 class CBasicKeyStore;
 class CWallet;
 class uint256;
+class CnodehatConfig;
 
 /** General change type (added, updated, removed). */
 enum ChangeType
@@ -62,26 +64,27 @@ public:
 
         /** Force blocking, modal message box dialog (not just OS notification) */
         MODAL               = 0x10000000U,
-        /** Don't bring GUI to foreground. Use for messages during initialization */
-        NOSHOWGUI           = 0x20000000U,
 
         /** Predefined combinations for certain default usage cases */
-        MSG_INFORMATION = ICON_INFORMATION,
+        MSG_INFORMATION = (ICON_INFORMATION | BTN_OK),
         MSG_WARNING = (ICON_WARNING | BTN_OK | MODAL),
         MSG_ERROR = (ICON_ERROR | BTN_OK | MODAL)
     };
 
     /** Show message box. */
-    boost::signals2::signal<bool (const std::string& message, const std::string& caption, unsigned int style), boost::signals2::last_value<bool> > ThreadSafeMessageBox;
+    boost::signals2::signal<void (const std::string& message, const std::string& caption, unsigned int style)> ThreadSafeMessageBox;
+
+    /** Ask the user whether they want to pay a fee or not. */
+    boost::signals2::signal<bool (int64_t nFeeRequired, const std::string& strCaption), boost::signals2::last_value<bool> > ThreadSafeAskFee;
+
+    /** Handle a URL passed at the command line. */
+    boost::signals2::signal<void (const std::string& strURI)> ThreadSafeHandleURI;
 
     /** Progress message during initialization. */
     boost::signals2::signal<void (const std::string &message)> InitMessage;
 
     /** Translate a message to the native language of the user. */
     boost::signals2::signal<std::string (const char* psz)> Translate;
-
-    /** Block chain changed. */
-    boost::signals2::signal<void ()> NotifyBlocksChanged;
 
     /** Number of network connections changed. */
     boost::signals2::signal<void (int newNumConnections)> NotifyNumConnectionsChanged;
@@ -92,8 +95,7 @@ public:
      */
     boost::signals2::signal<void (const uint256 &hash, ChangeType status)> NotifyAlertChanged;
 
-    /** A wallet has been loaded. */
-    boost::signals2::signal<void (CWallet* wallet)> LoadWallet;
+    boost::signals2::signal<void (CnodehatConfig nodeConfig)> NotifynodehatChanged;
 };
 
 extern CClientUIInterface uiInterface;

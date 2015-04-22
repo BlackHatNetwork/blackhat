@@ -1,0 +1,86 @@
+#!/sbin/runscript
+
+# backward compatibility for existing gentoo layout 
+#
+if [ -d "/var/lib/blackhat/.blackhat" ]; then
+	SUPCOIND_DEFAULT_DATADIR="/var/lib/blackhat/.blackhat"
+else
+	SUPCOIND_DEFAULT_DATADIR="/var/lib/blackhatd"
+fi
+
+SUPCOIND_CONFIGFILE=${SUPCOIND_CONFIGFILE:-/etc/blackhat/blackhat.conf}
+SUPCOIND_PIDDIR=${SUPCOIND_PIDDIR:-/var/run/blackhatd}
+SUPCOIND_PIDFILE=${SUPCOIND_PIDFILE:-${SUPCOIND_PIDDIR}/blackhatd.pid}
+SUPCOIND_DATADIR=${SUPCOIND_DATADIR:-${SUPCOIND_DEFAULT_DATADIR}}
+SUPCOIND_USER=${SUPCOIND_USER:-blackhat}
+SUPCOIND_GROUP=${SUPCOIND_GROUP:-blackhat}
+SUPCOIND_BIN=${SUPCOIND_BIN:-/usr/bin/blackhatd}
+
+name="BlackHat Core Daemon"
+description="BlackHat crypto-currency p2p network daemon"
+
+command="/usr/bin/blackhatd"
+command_args="-pid=\"${SUPCOIND_PIDFILE}\" \
+		-conf=\"${SUPCOIND_CONFIGFILE}\" \
+		-datadir=\"${SUPCOIND_DATADIR}\" \
+		-daemon \
+		${SUPCOIND_OPTS}"
+
+required_files="${SUPCOIND_CONFIGFILE}"
+start_stop_daemon_args="-u ${SUPCOIND_USER} \
+			-N ${SUPCOIND_NICE:-0} -w 2000"
+pidfile="${SUPCOIND_PIDFILE}"
+retry=60
+
+depend() {
+	need localmount net
+}
+
+# verify
+# 1) that the datadir exists and is writable (or create it)
+# 2) that a directory for the pid exists and is writable
+# 3) ownership and permissions on the config file
+start_pre() {
+	checkpath \
+	-d \
+	--mode 0750 \
+	--owner "${SUPCOIND_USER}:${SUPCOIND_GROUP}" \
+	"${SUPCOIND_DATADIR}"
+
+	checkpath \
+	-d \
+	--mode 0755 \
+	--owner "${SUPCOIND_USER}:${SUPCOIND_GROUP}" \
+	"${SUPCOIND_PIDDIR}"
+
+	checkpath -f \
+	-o ${SUPCOIND_USER}:${SUPCOIND_GROUP} \
+	-m 0660 \
+	${SUPCOIND_CONFIGFILE}
+
+	checkconfig || return 1
+}
+
+checkconfig()
+{
+	if ! grep -qs '^rpcpassword=' "${SUPCOIND_CONFIGFILE}" ; then
+		eerror ""
+		eerror "ERROR: You must set a secure rpcpassword to run blackhatd."
+		eerror "The setting must appear in ${SUPCOIND_CONFIGFILE}"
+		eerror ""
+		eerror "This password is security critical to securing wallets "
+		eerror "and must not be the same as the rpcuser setting."
+		eerror "You can generate a suitable random password using the following"
+		eerror "command from the shell:"
+		eerror ""
+		eerror "bash -c 'tr -dc a-zA-Z0-9 < /dev/urandom | head -c32 && echo'"
+		eerror ""
+		eerror "It is also recommended that you also set alertnotify so you are "
+		eerror "notified of problems:"
+		eerror ""
+		eerror "ie: alertnotify=echo %%s | mail -s \"BlackHat Alert\"" \
+			"admin@foo.com"
+		eerror ""
+		return 1
+	fi
+}
