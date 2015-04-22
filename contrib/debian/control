@@ -23,8 +23,8 @@ Build-Depends: debhelper,
  libprotobuf-dev, protobuf-compiler
 Standards-Version: 3.9.2
 Homepage: http://www.blackhat.org/
-Vcs-Git: git://github.com/blackhat/blackhat-TEST-ONLY.git
-Vcs-Browser: http://github.com/blackhat/blackhat
+Vcs-Git: git://github.com/blackhatnetwork/blackhat-TEST-ONLY.git
+Vcs-Browser: http://github.com/blackhatnetwork/blackhat
 
 Package: blackhatd
 Architecture: any

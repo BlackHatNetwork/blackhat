@@ -4,4 +4,4 @@ version=3
 opts=uversionmangle=s/(\d)(alpha|beta|rc)/$1~$2/;s/\-src//,dversionmangle=s/~dfsg\d*// \
  http://sf.net/blackhat/blackhat-(\d.*)-linux\.tar\.gz debian
 opts=uversionmangle=s/(\d)(alpha|beta|rc)/$1~$2/,dversionmangle=s/~dfsg\d*// \
- http://githubredir.debian.net/github/blackhat/blackhat v(.*).tar.gz
+ http://githubredir.debian.net/github/blackhatnetwork/blackhat v(.*).tar.gz

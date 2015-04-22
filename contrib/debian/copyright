@@ -2,8 +2,8 @@ Format: http://svn.debian.org/wsvn/dep/web/deps/dep5.mdwn?rev=174
 Upstream-Name: BlackHat
 Upstream-Contact: Satoshi Nakamoto <satoshin@gmx.com>
  irc://#blackhat@freenode.net
-Source: http://sourceforge.net/projects/blackhat/files/
- https://github.com/blackhat/blackhat
+Source: http://sourceforge.net/projects/blackhatnetwork/files/
+ https://github.com/blackhatnetwork/blackhat
 
 Files: *
 Copyright: 2009-2012, Bitcoin Core developers
